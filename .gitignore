@@ -1,0 +1,6 @@
+node_modules/
+*.bak-*
+*.swp
+.DS_Store
+.claude/
+.superpowers/

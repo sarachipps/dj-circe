@@ -1,0 +1,17 @@
+{
+  "name": "circe",
+  "productName": "Circe",
+  "version": "0.1.0",
+  "description": "Circe — tiled Electron UI for chatting with multiple Hermes agents",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4",
+    "marked": "^18.0.6"
+  }
+}

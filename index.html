@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hermes Tile</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="tile">
+      <header>
+        <div class="identity">
+          <h2 id="profile-name"></h2>
+          <span class="model" id="profile-model"></span>
+        </div>
+        <div class="header-controls">
+          <button
+            id="access-btn"
+            class="access-btn"
+            type="button"
+            title="Access mode"
+            aria-label="Cycle file-access mode"
+          >
+            <span class="access-icon" aria-hidden="true">🔓</span>
+          </button>
+          <div class="avatar" id="avatar" aria-hidden="true"></div>
+        </div>
+      </header>
+      <div class="tabs" id="tabs">
+        <div class="tab-strip" id="tab-strip"></div>
+        <button
+          id="new-tab"
+          class="new-tab"
+          title="New workstream"
+          type="button"
+          aria-label="New workstream"
+        >
+          +
+        </button>
+      </div>
+      <div class="transcript" id="transcript"></div>
+      <form id="composer">
+        <input id="input" type="text" autocomplete="off" />
+        <button id="send" type="submit">Send</button>
+      </form>
+    </div>
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>
