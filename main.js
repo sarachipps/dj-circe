@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const os = require('os');
 const log = require('electron-log/main');
 const { AcpClient } = require('./acpClient');
+const { runOnboarding, firstRunNeeded } = require('./onboarding/main');
 
 app.setName('Circe');
 log.initialize();
@@ -303,8 +304,48 @@ function watchProfilesDir() {
   }
 }
 
+if (process.argv.includes('--reset-onboarding')) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    const p = STATE_FILE;
+    let s = { profiles: {} };
+    try { s = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
+    s.firstRunComplete = false;
+    fs.writeFileSync(p, JSON.stringify(s, null, 2));
+    log.info(`--reset-onboarding flipped firstRunComplete=false in ${p}`);
+  } catch (err) {
+    log.error('--reset-onboarding failed:', err.message);
+  }
+}
+
 app.whenReady().then(async () => {
   log.info('app ready');
+
+  if (firstRunNeeded(STATE_DIR)) {
+    log.info('First-run: launching onboarding wizard');
+    try {
+      const result = await runOnboarding({
+        hermesHome: HERMES_HOME,
+        stateDir: STATE_DIR,
+        hermesBin: HERMES_BIN,
+        log,
+        logFilePath: log.transports.file.getFile().path,
+      });
+      if (!result.completed) {
+        log.info('Onboarding closed before completion — quitting.');
+        app.quit();
+        return;
+      }
+      log.info(`Onboarding complete. Orchestrator profile: ${result.orchestratorProfile}`);
+      // Reload the state cache so subsequent tile code sees the fresh state.json.
+      Object.assign(stateCache, loadStateFile());
+    } catch (err) {
+      log.error('Onboarding failed:', err.message);
+      app.quit();
+      return;
+    }
+  }
+
   try {
     const profiles = await loadProfiles();
     if (!profiles.length) {
