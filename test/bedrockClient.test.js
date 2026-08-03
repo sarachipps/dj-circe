@@ -4,7 +4,7 @@ const { verify, pickCharacter } = require('../bedrockClient');
 
 function makeFetch(responses) {
   let i = 0;
-  return async () => {
+  const fn = async () => {
     const r = responses[i++];
     if (r instanceof Error) throw r;
     return {
@@ -14,6 +14,10 @@ function makeFetch(responses) {
       text: async () => JSON.stringify(r.body),
     };
   };
+  Object.defineProperty(fn, 'calls', {
+    get() { return i; }
+  });
+  return fn;
 }
 
 test('verify: 200 → {ok: true}', async () => {
@@ -32,6 +36,7 @@ test('verify: 403 → auth error', async () => {
   const r = await verify('sk-test', makeFetch([{ status: 403, body: {} }]));
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.kind, 'auth');
+  assert.match(r.error, /token|key|invalid|401|confluence/i);
 });
 
 test('verify: network error → network kind', async () => {
@@ -69,18 +74,20 @@ test('pickCharacter: retries once on unparseable JSON, then errors', async () =>
   const junkPayload = {
     content: [{ type: 'text', text: 'sorry, no JSON here' }],
   };
+  const fetchImpl = makeFetch([
+    { status: 200, body: junkPayload },
+    { status: 200, body: junkPayload },
+  ]);
   const r = await pickCharacter({
     fandom: 'garbage',
     preferences: '',
     apiKey: 'sk-test',
     soulTemplate: 'TEMPLATE',
-    fetchImpl: makeFetch([
-      { status: 200, body: junkPayload },
-      { status: 200, body: junkPayload },
-    ]),
+    fetchImpl,
   });
   assert.ok(r.error, 'should return error');
   assert.match(r.error, /parse|json|response/i);
+  assert.strictEqual(fetchImpl.calls, 2, 'should have made exactly 2 fetch calls');
 });
 
 test('pickCharacter: surfaces LLM {error} directly', async () => {
@@ -97,6 +104,36 @@ test('pickCharacter: surfaces LLM {error} directly', async () => {
     fetchImpl: makeFetch([{ status: 200, body: errPayload }]),
   });
   assert.strictEqual(r.error, 'fandom too obscure');
+});
+
+test('pickCharacter: network error → returns network error copy', async () => {
+  const r = await pickCharacter({
+    fandom: 'x',
+    preferences: '',
+    apiKey: 'sk-test',
+    soulTemplate: 'TEMPLATE',
+    fetchImpl: makeFetch([new Error('ECONNREFUSED')]),
+  });
+  assert.ok(r.error);
+  assert.match(r.error, /network|VPN|reach/i);
+});
+
+test('pickCharacter: retries on incomplete JSON (missing required fields)', async () => {
+  const incompletePayload = {
+    content: [{ type: 'text', text: JSON.stringify({ name: 'X' }) }],
+  };
+  const r = await pickCharacter({
+    fandom: 'x',
+    preferences: '',
+    apiKey: 'sk-test',
+    soulTemplate: 'TEMPLATE',
+    fetchImpl: makeFetch([
+      { status: 200, body: incompletePayload },
+      { status: 200, body: incompletePayload },
+    ]),
+  });
+  assert.ok(r.error);
+  assert.match(r.error, /parse|valid|response/i);
 });
 
 test('pickCharacter: 401 from Bedrock → returns error', async () => {
