@@ -179,7 +179,7 @@ function writeStateComplete(stateDir, slug) {
   fs.writeFileSync(stateFile, JSON.stringify(existing, null, 2));
 }
 
-async function runOnboarding({ hermesHome, stateDir, hermesBin, log, logFilePath }) {
+async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
   const soulTemplate = readTemplate(SOUL_TEMPLATE_PATH);
   const firstTasksTemplate = readTemplate(FIRST_TASKS_TEMPLATE_PATH);
 
@@ -216,7 +216,7 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, log, logFilePath
   let finishState = { completed: false };
 
   on('onboarding:hermesDetect', async () => hermesInstall.detect());
-  on('onboarding:hermesInstall', async (evt) => {
+  on('onboarding:hermesInstall', async () => {
     const send = (line) => {
       if (!win.isDestroyed()) {
         win.webContents.send('onboarding:hermesInstall:progress', line);

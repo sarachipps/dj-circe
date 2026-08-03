@@ -44,5 +44,5 @@ contextBridge.exposeInMainWorld('onboarding', {
   openExternal: (url) => shell.openExternal(url),
   copyToClipboard: (text) => ipcRenderer.invoke('onboarding:copyToClipboard', { text }),
   copyLastLogLines: () => ipcRenderer.invoke('onboarding:copyLastLogLines'),
-  finish: () => ipcRenderer.invoke('onboarding:finish'),
+  finish: (slug) => ipcRenderer.invoke('onboarding:finish', { slug }),
 });
