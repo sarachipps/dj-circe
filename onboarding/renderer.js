@@ -352,6 +352,129 @@ async function getTmpProfileDir(slug) {
   return slug || '_scratch';
 }
 
+// --- Step 6: MCP wire-up + finish ----------------------------------------
+
+function commandFor(slug, kind) {
+  if (kind === 'glean:add') {
+    return `hermes -p ${slug} mcp add glean_default --command npx --args -y mcp-remote@0.1.38 https://dowjones-be.glean.com/mcp/default`;
+  }
+  if (kind === 'glean:login') return `hermes -p ${slug} mcp login glean_default`;
+  if (kind === 'atlassian:add') {
+    return `hermes -p ${slug} mcp add atlassian --url https://mcp.atlassian.com/v1/mcp --auth oauth`;
+  }
+  if (kind === 'atlassian:login') return `hermes -p ${slug} mcp login atlassian`;
+  return '';
+}
+
+function paintTestResult(el, kind, msg) {
+  el.className = 'test-result ' + (kind === 'ok' ? 'ok' : 'err');
+  el.textContent = msg;
+}
+
+async function runStep6() {
+  const cards = document.querySelector('.mcp-cards');
+  const cont = document.getElementById('step6-continue');
+  const inlinePanel = document.getElementById('mcp-inline');
+
+  cards.hidden = false;
+  cont.hidden = false;
+  inlinePanel.hidden = true;
+
+  cont.onclick = async () => {
+    state.mcpChoice = document.querySelector('input[name="mcp-choice"]:checked').value;
+    if (state.mcpChoice === 'orchestrator') {
+      const r = await window.onboarding.writeFirstTasks({ slug: state.slug });
+      if (!r.ok) {
+        alert(`Couldn't write first-tasks.md: ${r.error}`);
+        return;
+      }
+      return finish();
+    }
+    if (state.mcpChoice === 'skip') return finish();
+    // inline
+    cards.hidden = true;
+    cont.hidden = true;
+    inlinePanel.hidden = false;
+    setupInlinePasteBack();
+  };
+}
+
+function setupInlinePasteBack() {
+  const slug = state.slug;
+
+  document.getElementById('glean-cmd-add').textContent = commandFor(slug, 'glean:add');
+  document.getElementById('glean-cmd-login').textContent = commandFor(slug, 'glean:login');
+  document.getElementById('atlassian-cmd-add').textContent = commandFor(slug, 'atlassian:add');
+  document.getElementById('atlassian-cmd-login').textContent = commandFor(slug, 'atlassian:login');
+
+  document.querySelectorAll('button.copy').forEach((btn) => {
+    btn.onclick = () => {
+      const targetId = btn.dataset.copyTarget;
+      const text = document.getElementById(targetId).textContent;
+      window.onboarding.copyToClipboard(text);
+      const orig = btn.textContent;
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => (btn.textContent = orig), 1200);
+    };
+  });
+
+  document.querySelectorAll('button.test-connection').forEach((btn) => {
+    btn.onclick = async () => {
+      const server = btn.dataset.server;
+      const resultEl = document.querySelector(`.test-result[data-server="${server}"]`);
+      resultEl.className = 'test-result';
+      resultEl.textContent = 'Testing…';
+      const r = await window.onboarding.mcpTest({ slug, serverName: server });
+      if (!r.ok) {
+        paintTestResult(resultEl, 'err', r.error || 'test failed');
+        return;
+      }
+      const count = r.toolCount != null ? r.toolCount : '?';
+      paintTestResult(resultEl, 'ok', `${count} tools discovered ✓`);
+      if (server === 'atlassian') {
+        // Offer the 18-tool subset button once Atlassian is live.
+        const subsetBtn = document.getElementById('atlassian-apply-subset');
+        subsetBtn.hidden = false;
+        subsetBtn.onclick = async () => {
+          subsetBtn.disabled = true;
+          const r2 = await window.onboarding.mcpApplyAtlassianSubset({ slug });
+          subsetBtn.disabled = false;
+          if (!r2.ok) {
+            paintTestResult(resultEl, 'err', `subset write failed: ${r2.error}`);
+            return;
+          }
+          paintTestResult(resultEl, 'ok', `${r2.toolCount || 18} tools after subset ✓`);
+        };
+      }
+    };
+  });
+
+  document.querySelectorAll('button.skip-card').forEach((btn) => {
+    btn.onclick = () => {
+      // Skipping a card just visually greys it — the user can still hit Done.
+      const card = btn.closest('.paste-card');
+      card.style.opacity = 0.5;
+      btn.disabled = true;
+    };
+  });
+
+  document.getElementById('mcp-inline-back').onclick = () => {
+    document.getElementById('mcp-inline').hidden = true;
+    document.querySelector('.mcp-cards').hidden = false;
+    document.getElementById('step6-continue').hidden = false;
+  };
+  document.getElementById('mcp-inline-done').onclick = () => finish();
+}
+
+async function finish() {
+  const r = await window.onboarding.finish({ slug: state.slug });
+  if (!r || !r.ok) {
+    alert('Could not save onboarding state. Try again in a moment.');
+    return;
+  }
+  // Main process will destroy the window; nothing else to do here.
+}
+
 // --- Step-runner dispatch -------------------------------------------------
 
 const _origGoTo = goToStep;
@@ -361,4 +484,5 @@ window.goToStep = function (n) {
   if (n === 3) runStep3();
   if (n === 4) runStep4();
   if (n === 5) runStep5();
+  if (n === 6) runStep6();
 };
