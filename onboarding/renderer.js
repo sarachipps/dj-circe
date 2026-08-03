@@ -299,6 +299,8 @@ async function runStep5() {
       return;
     }
     state.profileDir = create.profileDir;
+    state.avatarPath = _pendingAvatarPath;
+    state.avatarSource = _pendingAvatarSource;
     // Hermes-side re-verify to catch env-shadowed configs.
     const v = await window.onboarding.bedrockVerifyHermes(state.slug);
     if (!v.ok) {
