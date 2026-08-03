@@ -305,13 +305,15 @@ async function runStep5() {
     const v = await window.onboarding.bedrockVerifyHermes(state.slug);
     if (!v.ok) {
       confirm.disabled = false;
+      // Roll back the profile so re-verify from Step 3 can re-create cleanly.
+      await window.onboarding.deleteProfile({ slug: state.slug });
+      state.profileDir = null;
       showError(
         errBox,
-        `Hermes couldn't reach Bedrock with the profile we just wrote (${v.error}). Rolling back — you'll be sent back to the Bedrock step.`,
+        `Hermes couldn't reach Bedrock with the profile we just wrote (${v.error}). Rolled back — you'll be sent back to the Bedrock step.`,
       );
       logActions.hidden = false;
       copyLogBtn.onclick = () => window.onboarding.copyLastLogLines();
-      // Bounce back to Step 3 after a short delay.
       setTimeout(() => window.goToStep(3), 2500);
       return;
     }

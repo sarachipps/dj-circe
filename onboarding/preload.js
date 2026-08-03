@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('onboarding', {
     ipcRenderer.invoke('onboarding:uploadAvatar', args),
   createOrchestrator: (args) =>
     ipcRenderer.invoke('onboarding:createOrchestrator', args),
+  deleteProfile: (args) => ipcRenderer.invoke('onboarding:deleteProfile', args),
   mcpTest: (args) => ipcRenderer.invoke('onboarding:mcpTest', args),
   mcpApplyAtlassianSubset: (args) =>
     ipcRenderer.invoke('onboarding:mcpApplyAtlassianSubset', args),

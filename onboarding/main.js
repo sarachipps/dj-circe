@@ -279,6 +279,16 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
     return { ok: true, source: 'upload', path: outPath };
   });
 
+  on('onboarding:deleteProfile', async (_e, { slug }) => {
+    if (!slug) return { ok: false, error: 'no slug' };
+    const del = await runHermesSubprocess({
+      hermesBin,
+      args: ['profile', 'delete', slug, '--yes'],
+      hermesHome,
+    });
+    return { ok: del.code === 0, error: del.code === 0 ? undefined : (del.stderr || 'delete failed') };
+  });
+
   on('onboarding:createOrchestrator', async (_e, args) => {
     const {
       slug,
