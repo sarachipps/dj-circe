@@ -243,19 +243,28 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
     bedrockClient.pickCharacter({ fandom, preferences, apiKey, soulTemplate }),
   );
 
+  function resolveProfileDir(slugOrDir) {
+    if (!slugOrDir) return path.join(hermesHome, 'profiles', '_scratch');
+    if (slugOrDir.includes('/') || slugOrDir.includes(path.sep)) return slugOrDir;
+    return path.join(hermesHome, 'profiles', slugOrDir);
+  }
+
   on('onboarding:fetchAvatar', async (_e, { characterName, profileDir }) => {
+    const dir = resolveProfileDir(profileDir);
     const hit = await wikipediaClient.fetchLeadImage(characterName);
     if (!hit) return { source: 'miss' };
-    const outPath = await wikipediaClient.saveAsAvatar(hit.imageBuffer, profileDir);
+    const outPath = await wikipediaClient.saveAsAvatar(hit.imageBuffer, dir);
     return { source: 'wikipedia', path: outPath, sourceUrl: hit.sourceUrl };
   });
 
   on('onboarding:renderInitialsAvatar', async (_e, { characterName, profileDir }) => {
-    const outPath = await avatarInitials.saveTo(characterName, profileDir);
+    const dir = resolveProfileDir(profileDir);
+    const outPath = await avatarInitials.saveTo(characterName, dir);
     return { source: 'initials', path: outPath };
   });
 
   on('onboarding:uploadAvatar', async (_e, { profileDir }) => {
+    const dir = resolveProfileDir(profileDir);
     const res = await dialog.showOpenDialog(win, {
       title: 'Choose an avatar image',
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
@@ -265,8 +274,8 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
       return { ok: false, canceled: true };
     }
     const bytes = fs.readFileSync(res.filePaths[0]);
-    fs.mkdirSync(profileDir, { recursive: true });
-    const outPath = await wikipediaClient.saveAsAvatar(bytes, profileDir);
+    fs.mkdirSync(dir, { recursive: true });
+    const outPath = await wikipediaClient.saveAsAvatar(bytes, dir);
     return { ok: true, source: 'upload', path: outPath };
   });
 
