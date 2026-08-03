@@ -469,7 +469,7 @@ function setupInlinePasteBack() {
 }
 
 async function finish() {
-  const r = await window.onboarding.finish({ slug: state.slug });
+  const r = await window.onboarding.finish(state.slug);
   if (!r || !r.ok) {
     alert('Could not save onboarding state. Try again in a moment.');
     return;
