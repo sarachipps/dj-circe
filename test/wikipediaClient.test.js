@@ -128,6 +128,56 @@ test('fetchLeadImage: returns null on network error', async () => {
   assert.strictEqual(r, null);
 });
 
+test('fetchLeadImage: returns null when image URL returns 404', async () => {
+  const fetchImpl = makeFetch([
+    [
+      '/search/title',
+      {
+        status: 200,
+        body: { pages: [{ title: 'BadImagePage' }] },
+      },
+    ],
+    [
+      '/page/summary/BadImagePage',
+      {
+        status: 200,
+        body: {
+          originalimage: { source: 'https://upload.wikimedia.org/badimage.png' },
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/BadImagePage' } },
+        },
+      },
+    ],
+    ['upload.wikimedia.org/badimage.png', { status: 404, body: {} }],
+  ]);
+  const r = await fetchLeadImage('test', { fetchImpl });
+  assert.strictEqual(r, null);
+});
+
+test('fetchLeadImage: returns null when image URL throws network error', async () => {
+  const fetchImpl = makeFetch([
+    [
+      '/search/title',
+      {
+        status: 200,
+        body: { pages: [{ title: 'NetErrorPage' }] },
+      },
+    ],
+    [
+      '/page/summary/NetErrorPage',
+      {
+        status: 200,
+        body: {
+          originalimage: { source: 'https://upload.wikimedia.org/neterror.png' },
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/NetErrorPage' } },
+        },
+      },
+    ],
+    ['upload.wikimedia.org/neterror.png', new Error('ECONNREFUSED')],
+  ]);
+  const r = await fetchLeadImage('test', { fetchImpl });
+  assert.strictEqual(r, null);
+});
+
 test('saveAsAvatar: writes 512x512 PNG at profileDir/avatar.png', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'circe-wiki-'));
   const inputBytes = await mkPngBytes(1200, 800);
