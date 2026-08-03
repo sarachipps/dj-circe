@@ -77,7 +77,7 @@ async function runStep2() {
   if (r.present) {
     container.textContent = `Hermes is installed. (${r.version || 'version unknown'})`;
     container.classList.add('ok');
-    setTimeout(() => goToStep(3), 800);
+    setTimeout(() => window.goToStep(3), 800);
     return;
   }
   container.textContent =
@@ -98,7 +98,7 @@ async function runStep2() {
       if (d.present) {
         container.textContent = `Hermes installed (${d.version || ''}). Continuing…`;
         container.classList.add('ok');
-        setTimeout(() => goToStep(3), 800);
+        setTimeout(() => window.goToStep(3), 800);
         return;
       }
       container.textContent = 'Restart Circe to pick up the new install.';
@@ -169,7 +169,7 @@ async function runStep3() {
       state.bedrockCase = kind;
       verifyState.textContent = 'Bedrock says: works. ✓';
       verifyState.classList.add('ok');
-      setTimeout(() => goToStep(4), 700);
+      setTimeout(() => window.goToStep(4), 700);
       return;
     }
     showError(verifyState, r.error);
