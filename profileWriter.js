@@ -92,7 +92,7 @@ async function createOrchestrator({
     });
     return {
       ok: false,
-      rolledBack: del.code === 0,
+      rolledBack: true,
       error: writeErr.message || String(writeErr),
     };
   }

@@ -122,13 +122,14 @@ test('createOrchestrator: post-create write failure → rollback via hermes prof
     if (args[1] === 'delete') return { code: 0 };
     return { code: 0 };
   });
+  const hermesHome = path.join(tmp, 'does-not-exist-and-cant-be-made', '\0invalid');
   const r = await createOrchestrator({
     slug: 'picard',
     oneLiner: 'x',
     soulMd: '# x\n',
     avatarBytes: bytes,
     avatarSource: null,
-    hermesHome: path.join(tmp, 'does-not-exist-and-cant-be-made', '\0invalid'),
+    hermesHome,
     hermesBin: '/fake/hermes',
     spawnImpl,
   });
@@ -137,6 +138,7 @@ test('createOrchestrator: post-create write failure → rollback via hermes prof
   // Should have tried create AND delete.
   assert.strictEqual(calls.length, 2);
   assert.deepStrictEqual(calls[1].args.slice(0, 3), ['profile', 'delete', 'picard']);
+  assert.strictEqual(calls[1].env.HERMES_HOME, hermesHome);
 });
 
 test('writeFirstTasks: writes file into profile dir', async (t) => {
