@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:;">
+  <title>Welcome to Circe</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wizard">
+    <header class="chrome">
+      <button id="back-btn" class="back-btn" disabled>← Back</button>
+      <span id="step-indicator" class="step-indicator">Step 1 of 6</span>
+      <span class="chrome-spacer"></span>
+    </header>
+
+    <main id="wizard-body">
+      <!-- Step 1: Welcome -->
+      <section class="step" data-step="1" hidden>
+        <h1>Welcome to Circe</h1>
+        <p class="lede">
+          Circe is a home for your AI agents. Let's set up your first one —
+          this takes about 3 minutes.
+        </p>
+        <button class="primary" data-action="next">Continue</button>
+      </section>
+
+      <!-- Step 2: Hermes check -->
+      <section class="step" data-step="2" hidden>
+        <h1>Checking for Hermes</h1>
+        <div id="hermes-state" class="state"></div>
+        <div id="hermes-install-log" class="log" hidden></div>
+        <div class="actions">
+          <button id="hermes-install" class="primary" hidden>Install Hermes</button>
+          <button id="hermes-retry" class="secondary" hidden>Try again</button>
+          <button id="hermes-quit" class="secondary" hidden>Quit</button>
+          <button id="hermes-copy-log" class="ghost" hidden>Copy log</button>
+        </div>
+      </section>
+
+      <!-- Step 3: Bedrock credentials -->
+      <section class="step" data-step="3" hidden>
+        <h1>Bedrock credentials</h1>
+        <div id="bedrock-case-a" class="case" hidden>
+          <p>
+            Looks like you already have Claude Code working. I can reuse that
+            same key for Hermes — no need to regenerate anything (regenerating
+            would silently break your Claude Code).
+          </p>
+          <button id="bedrock-reuse" class="primary">Reuse this key</button>
+        </div>
+        <div id="bedrock-case-b" class="case" hidden>
+          <p>
+            You'll need a Dow Jones Bedrock key. If you already have one, paste
+            it below. If not,
+            <a href="#" id="bedrock-help-link"
+               data-url="https://newscorp.enterprise.slack.com/docs/T025QN6JG/F096R3WLJJX">
+              this walkthrough
+            </a>
+            gets you one — it also sets up Claude Code, and Circe will detect
+            the key when you come back.
+          </p>
+          <label>
+            Bedrock API key
+            <input id="bedrock-token-input" type="password" autocomplete="off"
+                   placeholder="sk-...">
+          </label>
+          <button id="bedrock-paste-continue" class="primary">Continue</button>
+        </div>
+        <div id="bedrock-verify-state" class="state" hidden></div>
+        <div class="actions" id="bedrock-error-actions" hidden>
+          <button id="bedrock-copy-log" class="ghost">Copy log</button>
+        </div>
+      </section>
+
+      <!-- Step 4: Fandom -->
+      <section class="step" data-step="4" hidden>
+        <h1>Meet your Orchestrator</h1>
+        <p class="lede">
+          Every Circe agent has a personality. Your first agent — the
+          <strong>Orchestrator</strong> — is the one who'll help you spin up
+          others later, kind of like a project manager for your fleet. Let's
+          find them a personality.
+        </p>
+        <label>
+          What's a fandom you love?
+          <input id="fandom-input" type="text" placeholder="Star Trek: The Next Generation">
+        </label>
+        <label>
+          Anything specific about how you like to work? <span class="optional">(optional)</span>
+          <input id="preferences-input" type="text" placeholder="I like calm strategic thinkers.">
+        </label>
+        <button id="fandom-submit" class="primary">Meet my Orchestrator</button>
+        <div id="fandom-loading" class="state" hidden>
+          Asking Claude to pick your Orchestrator — 5 to 15 seconds…
+        </div>
+        <div id="fandom-error" class="state error" hidden></div>
+      </section>
+
+      <!-- Step 5: Meet your Orchestrator -->
+      <section class="step" data-step="5" hidden>
+        <h1 id="orchestrator-header">Meet your Orchestrator</h1>
+        <div class="meet-grid">
+          <div class="meet-left">
+            <img id="orchestrator-avatar" alt="" width="256" height="256">
+            <div class="avatar-actions">
+              <button id="upload-avatar" class="secondary">Upload your own</button>
+              <button id="regen-avatar" class="ghost">Regenerate</button>
+            </div>
+          </div>
+          <div class="meet-right">
+            <p id="orchestrator-oneliner" class="oneliner"></p>
+            <details id="soul-preview-wrap">
+              <summary>Preview SOUL.md (advanced)</summary>
+              <textarea id="soul-preview" rows="18" cols="60"></textarea>
+            </details>
+            <div class="actions">
+              <button id="try-another" class="secondary">Try another character</button>
+              <button id="confirm-orchestrator" class="primary">Confirm & continue</button>
+            </div>
+          </div>
+        </div>
+        <div id="meet-error" class="state error" hidden></div>
+        <div id="meet-log-actions" class="actions" hidden>
+          <button id="meet-copy-log" class="ghost">Copy log</button>
+        </div>
+      </section>
+
+      <!-- Step 6: Wire up MCPs -->
+      <section class="step" data-step="6" hidden>
+        <h1>Wire up your Orchestrator</h1>
+        <p class="lede">
+          Your Orchestrator is ready. Before we open Circe, do you want to hook
+          it into your Dow Jones tools? You'll get better answers when it can
+          search Glean, look up Jira tickets, and read Confluence — but it works
+          fine without them too. Some of these need you to run a command or two
+          in your terminal. Your Orchestrator can walk you through it, or you
+          can do it now.
+        </p>
+        <div class="mcp-cards">
+          <label class="radio-card recommended">
+            <input type="radio" name="mcp-choice" value="orchestrator" checked>
+            <div>
+              <div class="radio-title">Let my Orchestrator help me <span class="chip">Recommended</span></div>
+              <p>Skip this step for now. The first thing your Orchestrator says when you open Circe will be an offer to walk you through hooking up Glean and Atlassian together — one paste at a time, at your pace.</p>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" name="mcp-choice" value="inline">
+            <div>
+              <div class="radio-title">Show me the commands now</div>
+              <p>I'll paste them into my terminal myself. Circe will show you exactly what to copy for Glean and Atlassian, and verify each one worked.</p>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" name="mcp-choice" value="skip">
+            <div>
+              <div class="radio-title">Skip this — I'll figure it out later</div>
+              <p>No prompt, no cards. Your Orchestrator can still chat and think, it just can't look anything up at Dow Jones.</p>
+            </div>
+          </label>
+        </div>
+        <button id="step6-continue" class="primary">Continue</button>
+
+        <!-- Inline paste-back sub-step -->
+        <div id="mcp-inline" class="mcp-inline" hidden>
+          <h2>Wiring up Glean and Atlassian</h2>
+          <section class="paste-card" data-server="glean_default">
+            <h3>Glean</h3>
+            <ol>
+              <li>
+                <code id="glean-cmd-add" class="cmdline"></code>
+                <button class="copy" data-copy-target="glean-cmd-add">Copy</button>
+              </li>
+              <li>
+                <code id="glean-cmd-login" class="cmdline"></code>
+                <button class="copy" data-copy-target="glean-cmd-login">Copy</button>
+                <p class="note">A browser tab will open for Glean SSO. Approve there, then come back.</p>
+              </li>
+            </ol>
+            <div class="actions">
+              <button class="test-connection" data-server="glean_default">Test connection</button>
+              <span class="test-result" data-server="glean_default"></span>
+              <button class="ghost skip-card" data-card="glean">Skip Glean</button>
+            </div>
+          </section>
+          <section class="paste-card" data-server="atlassian">
+            <h3>Atlassian</h3>
+            <ol>
+              <li>
+                <code id="atlassian-cmd-add" class="cmdline"></code>
+                <button class="copy" data-copy-target="atlassian-cmd-add">Copy</button>
+              </li>
+              <li>
+                <code id="atlassian-cmd-login" class="cmdline"></code>
+                <button class="copy" data-copy-target="atlassian-cmd-login">Copy</button>
+              </li>
+            </ol>
+            <div class="actions">
+              <button class="test-connection" data-server="atlassian">Test connection</button>
+              <span class="test-result" data-server="atlassian"></span>
+              <button id="atlassian-apply-subset" class="secondary" hidden>Apply Sara's 18-tool read-only starter set</button>
+              <button class="ghost skip-card" data-card="atlassian">Skip Atlassian</button>
+            </div>
+          </section>
+          <div class="actions bottom">
+            <button id="mcp-inline-back" class="secondary">← Back</button>
+            <button id="mcp-inline-done" class="primary">Done — open Circe</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
