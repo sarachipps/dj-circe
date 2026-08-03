@@ -280,25 +280,30 @@ async function runStep5() {
   confirm.onclick = async () => {
     confirm.disabled = true;
     const soulMdEdited = soulPreview.value;
-    const create = await window.onboarding.createOrchestrator({
-      slug: state.slug,
-      oneLiner: c.oneLiner,
-      soulMd: soulMdEdited,
-      avatarPath: _pendingAvatarPath,
-      avatarSource: _pendingAvatarSource,
-      apiKey: state.bedrockToken,
-    });
-    if (!create.ok) {
-      confirm.disabled = false;
-      const msg = create.rolledBack
-        ? `Something went wrong writing the profile, so I rolled it back. ${create.error}`
-        : create.error;
-      showError(errBox, msg);
-      logActions.hidden = false;
-      copyLogBtn.onclick = () => window.onboarding.copyLastLogLines();
-      return;
+    // Re-entry from Step 6 → back → Step 5: profile already exists, skip create.
+    // (Fix 1 clears state.profileDir on verify-fail, so this branch fires only
+    // on a genuine back-nav after a successful verify.)
+    if (!state.profileDir) {
+      const create = await window.onboarding.createOrchestrator({
+        slug: state.slug,
+        oneLiner: c.oneLiner,
+        soulMd: soulMdEdited,
+        avatarPath: _pendingAvatarPath,
+        avatarSource: _pendingAvatarSource,
+        apiKey: state.bedrockToken,
+      });
+      if (!create.ok) {
+        confirm.disabled = false;
+        const msg = create.rolledBack
+          ? `Something went wrong writing the profile, so I rolled it back. ${create.error}`
+          : create.error;
+        showError(errBox, msg);
+        logActions.hidden = false;
+        copyLogBtn.onclick = () => window.onboarding.copyLastLogLines();
+        return;
+      }
+      state.profileDir = create.profileDir;
     }
-    state.profileDir = create.profileDir;
     state.avatarPath = _pendingAvatarPath;
     state.avatarSource = _pendingAvatarSource;
     // Hermes-side re-verify to catch env-shadowed configs.
