@@ -84,7 +84,7 @@ async function createOrchestrator({
     return { ok: true, profileDir };
   } catch (writeErr) {
     // 3. Rollback via hermes profile delete.
-    const del = await runHermes({
+    await runHermes({
       bin: hermesBin,
       args: ['profile', 'delete', slug, '--yes'],
       hermesHome,
