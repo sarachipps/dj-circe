@@ -5,13 +5,17 @@
   "description": "Circe — tiled Electron UI for chatting with multiple Hermes agents",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test test/",
+    "dev:onboarding": "./scripts/dev-onboarding.sh",
+    "reset:onboarding": "./scripts/reset-onboarding.sh"
   },
   "devDependencies": {
     "electron": "^32.0.0"
   },
   "dependencies": {
     "electron-log": "^5.4.4",
-    "marked": "^18.0.6"
+    "marked": "^18.0.6",
+    "sharp": "^0.33.5"
   }
 }
