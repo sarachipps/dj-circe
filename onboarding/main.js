@@ -230,11 +230,6 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
     bedrockClient.verify(apiKey),
   );
 
-  on('onboarding:bedrockWriteProfileConfig', async (_e, { slug, apiKey }) => {
-    const profileDir = path.join(hermesHome, 'profiles', slug);
-    return profileWriter.writeBedrockConfig({ profileDir, apiKey });
-  });
-
   on('onboarding:bedrockVerifyHermes', async (_e, { slug }) =>
     verifyHermesUnderScrubbedEnv({ slug, hermesHome, hermesBin }),
   );

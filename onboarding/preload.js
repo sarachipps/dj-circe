@@ -22,8 +22,6 @@ contextBridge.exposeInMainWorld('onboarding', {
     ipcRenderer.invoke('onboarding:bedrockDetectClaudeCode'),
   bedrockVerifyDirect: (apiKey) =>
     ipcRenderer.invoke('onboarding:bedrockVerifyDirect', { apiKey }),
-  bedrockWriteProfileConfig: (args) =>
-    ipcRenderer.invoke('onboarding:bedrockWriteProfileConfig', args),
   bedrockVerifyHermes: (slug) =>
     ipcRenderer.invoke('onboarding:bedrockVerifyHermes', { slug }),
   pickCharacter: (args) =>
