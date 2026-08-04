@@ -80,6 +80,18 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .state.error { background: #fef0f0; color: #a12; }
 .state.ok { background: #edf7ec; color: #276b1e; }
+.state.loading { display: flex; align-items: center; gap: 10px; }
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(26, 95, 255, 0.25);
+  border-top-color: #1a5fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .log {
   background: #1a1a1a;
