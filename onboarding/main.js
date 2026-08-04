@@ -190,7 +190,7 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
     minHeight: 620,
     title: 'Welcome to Circe',
     resizable: true,
-    closable: false, // No close button — quitting = quitting Circe until finish
+    closable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
