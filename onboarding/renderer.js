@@ -366,11 +366,12 @@ async function runStep5() {
 }
 
 async function getTmpProfileDir(slug) {
-  // Main-side handlers resolve to <HERMES_HOME>/profiles/<slug>. Before the
-  // profile is created (via createOrchestrator), scratch files land in a
-  // sibling '_scratch' dir under HERMES_HOME/profiles/. After, files land
-  // in the real profile dir with the same slug.
-  return slug || '_scratch';
+  // Scratch until hermes has created the real profile — otherwise our avatar
+  // mkdir claims the profile slug's directory and `hermes profile create`
+  // then refuses because the dir already exists. After creation we write
+  // into the real profile dir so regenerate/upload updates take effect.
+  if (state.profileDir) return state.profileDir;
+  return '_scratch';
 }
 
 // --- Step 6: MCP wire-up + finish ----------------------------------------
