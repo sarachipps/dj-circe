@@ -92,13 +92,28 @@ function extractTextContent(payload) {
   return '';
 }
 
+function stripCodeFences(text) {
+  // Handle ```json ... ``` and bare ``` ... ``` wrappers.
+  const m = text.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  return m ? m[1].trim() : text.trim();
+}
+
 function parsePickResponse(text) {
   if (!text) return { ok: false };
-  const trimmed = text.trim();
+  const stripped = stripCodeFences(text);
   try {
-    const parsed = JSON.parse(trimmed);
+    const parsed = JSON.parse(stripped);
     if (parsed && typeof parsed === 'object') return { ok: true, value: parsed };
   } catch {}
+  // Last-ditch: extract the first {...} block (Claude sometimes prefaces JSON
+  // with a sentence even when told not to).
+  const braceMatch = stripped.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try {
+      const parsed = JSON.parse(braceMatch[0]);
+      if (parsed && typeof parsed === 'object') return { ok: true, value: parsed };
+    } catch {}
+  }
   return { ok: false };
 }
 
