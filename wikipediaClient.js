@@ -5,10 +5,13 @@ const sharp = require('sharp');
 const SEARCH_URL = 'https://en.wikipedia.org/w/rest.php/v1/search/title';
 const SUMMARY_URL = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
 const MAX_CANDIDATES = 3;
+// Wikimedia's UA policy (meta.wikimedia.org/wiki/User-Agent_policy) rate-limits
+// anonymous default agents to 429; identify Circe explicitly.
+const USER_AGENT = 'Circe/0.1 (https://github.com/dowjones/circe; circe@dowjones.com)';
 
 async function safeGet(url, fetchImpl) {
   try {
-    const res = await fetchImpl(url);
+    const res = await fetchImpl(url, { headers: { 'User-Agent': USER_AGENT } });
     if (!res.ok) return null;
     return res;
   } catch {
