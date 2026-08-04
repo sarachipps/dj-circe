@@ -10,24 +10,36 @@
   <div class="wizard">
     <header class="chrome">
       <button id="back-btn" class="back-btn" disabled>← Back</button>
-      <span id="step-indicator" class="step-indicator">Step 1 of 6</span>
-      <span class="chrome-spacer"></span>
+      <div class="progress" role="progressbar" aria-valuemin="1" aria-valuemax="6" aria-valuenow="1">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <span id="step-indicator" class="step-indicator">1 / 6</span>
     </header>
+    <p id="step-title" class="step-title"></p>
 
     <main id="wizard-body">
       <!-- Step 1: Welcome -->
       <section class="step" data-step="1" hidden>
-        <h1>Welcome to Circe</h1>
-        <p class="lede">
-          Circe is a home for your AI agents. Let's set up your first one —
-          this takes about 3 minutes.
-        </p>
-        <button class="primary" data-action="next">Continue</button>
+        <div class="hero">
+          <div class="hero-mark">✨</div>
+          <h1>Welcome to Circe</h1>
+          <p class="lede">
+            Circe is a home for your AI agents. In the next few minutes we'll
+            build your first one together — an <strong>Orchestrator</strong>
+            who'll help you spin up the rest of your fleet.
+          </p>
+        </div>
+        <button class="primary large" data-action="next">Let's get started →</button>
+        <p class="fine-print">Takes about 3 minutes. You can quit any time.</p>
       </section>
 
       <!-- Step 2: Hermes check -->
       <section class="step" data-step="2" hidden>
-        <h1>Checking for Hermes</h1>
+        <h1>Getting Hermes ready</h1>
+        <p class="lede">
+          Hermes is the runtime that keeps your agents alive between chats.
+          Circe uses it under the hood.
+        </p>
         <div id="hermes-state" class="state"></div>
         <div id="hermes-install-log" class="log" hidden></div>
         <div class="actions">
@@ -40,25 +52,28 @@
 
       <!-- Step 3: Bedrock credentials -->
       <section class="step" data-step="3" hidden>
-        <h1>Bedrock credentials</h1>
+        <h1>Connect to Claude</h1>
+        <p class="lede">
+          Your agents run on Claude via Dow Jones's Bedrock. You need one API
+          key — Circe handles the rest.
+        </p>
         <div id="bedrock-case-a" class="case" hidden>
           <p>
-            Looks like you already have Claude Code working. I can reuse that
-            same key for Hermes — no need to regenerate anything (regenerating
-            would silently break your Claude Code).
+            Good news — you already have Claude Code set up. Circe can reuse
+            that same key so nothing gets regenerated (regenerating would
+            silently break Claude Code).
           </p>
-          <button id="bedrock-reuse" class="primary">Reuse this key</button>
+          <button id="bedrock-reuse" class="primary">Reuse my Claude Code key</button>
         </div>
         <div id="bedrock-case-b" class="case" hidden>
           <p>
-            You'll need a Dow Jones Bedrock key. If you already have one, paste
-            it below. If not,
+            Paste your Dow Jones Bedrock key below. Don't have one?
             <a href="#" id="bedrock-help-link"
                data-url="https://newscorp.enterprise.slack.com/docs/T025QN6JG/F096R3WLJJX">
-              this walkthrough
+              This walkthrough
             </a>
-            gets you one — it also sets up Claude Code, and Circe will detect
-            the key when you come back.
+            gets you one in about a minute — it sets up Claude Code too, so
+            Circe will just pick up the key when you come back.
           </p>
           <label>
             Bedrock API key
@@ -75,22 +90,21 @@
 
       <!-- Step 4: Fandom -->
       <section class="step" data-step="4" hidden>
-        <h1>Meet your Orchestrator</h1>
+        <h1>Who should your Orchestrator be?</h1>
         <p class="lede">
-          Every Circe agent has a personality. Your first agent — the
-          <strong>Orchestrator</strong> — is the one who'll help you spin up
-          others later, kind of like a project manager for your fleet. Let's
-          find them a personality.
+          Every Circe agent has a personality. Tell us a world you love —
+          Claude will pick someone from it who'd make a great chief of staff
+          for your fleet.
         </p>
         <label>
-          What's a fandom you love?
-          <input id="fandom-input" type="text" placeholder="Star Trek: The Next Generation">
+          A fandom, universe, or community you love
+          <input id="fandom-input" type="text" placeholder="e.g. Star Trek: TNG, The New York Mets, jazz in the 1960s">
         </label>
         <label>
-          Anything specific about how you like to work? <span class="optional">(optional)</span>
-          <input id="preferences-input" type="text" placeholder="I like calm strategic thinkers.">
+          Anything about how you like to work? <span class="optional">(optional)</span>
+          <input id="preferences-input" type="text" placeholder="e.g. I like calm strategic thinkers who don't over-explain.">
         </label>
-        <button id="fandom-submit" class="primary">Meet my Orchestrator</button>
+        <button id="fandom-submit" class="primary large">Pick my Orchestrator →</button>
         <div id="fandom-loading" class="state loading" hidden>
           <span class="spinner" aria-hidden="true"></span>
           <span>Asking Claude to pick your Orchestrator — this can take up to a minute…</span>
@@ -129,14 +143,17 @@
 
       <!-- Step 6: Wire up MCPs -->
       <section class="step" data-step="6" hidden>
-        <h1>Wire up your Orchestrator</h1>
+        <div id="celebration" class="celebration">
+          <img id="celebration-avatar" alt="" width="72" height="72">
+          <div class="celebration-copy">
+            <div class="celebration-eyebrow">Ready to meet the team</div>
+            <h1 id="celebration-heading">Your Orchestrator is set up</h1>
+          </div>
+        </div>
         <p class="lede">
-          Your Orchestrator is ready. Before we open Circe, do you want to hook
-          it into your Dow Jones tools? You'll get better answers when it can
-          search Glean, look up Jira tickets, and read Confluence — but it works
-          fine without them too. Some of these need you to run a command or two
-          in your terminal. Your Orchestrator can walk you through it, or you
-          can do it now.
+          One last thing — do you want to hook Circe into your Dow Jones tools?
+          Your Orchestrator answers better when it can search Glean, read
+          Confluence, and pull Jira tickets. It works fine without them too.
         </p>
         <div class="mcp-cards">
           <label class="radio-card recommended">

@@ -17,6 +17,14 @@ const state = {
 
 const stepEl = (n) => document.querySelector(`.step[data-step="${n}"]`);
 const totalSteps = 6;
+const STEP_TITLES = {
+  1: '',
+  2: 'The runtime',
+  3: 'Your Claude key',
+  4: 'Personality',
+  5: 'Meet them',
+  6: 'Tools',
+};
 
 function goToStep(n) {
   state.step = n;
@@ -25,7 +33,11 @@ function goToStep(n) {
     if (el) el.hidden = i !== n;
   }
   const indicator = document.getElementById('step-indicator');
-  if (indicator) indicator.textContent = `Step ${n} of ${totalSteps}`;
+  if (indicator) indicator.textContent = `${n} / ${totalSteps}`;
+  const fill = document.getElementById('progress-fill');
+  if (fill) fill.style.width = `${((n - 1) / (totalSteps - 1)) * 100}%`;
+  const titleEl = document.getElementById('step-title');
+  if (titleEl) titleEl.textContent = STEP_TITLES[n] || '';
   const back = document.getElementById('back-btn');
   if (back) back.disabled = n === 1;
 }
@@ -384,6 +396,13 @@ async function runStep6() {
   const cards = document.querySelector('.mcp-cards');
   const cont = document.getElementById('step6-continue');
   const inlinePanel = document.getElementById('mcp-inline');
+
+  const heading = document.getElementById('celebration-heading');
+  const celebAvatar = document.getElementById('celebration-avatar');
+  if (heading && state.character) heading.textContent = `${state.character.name} is ready to go`;
+  if (celebAvatar && state.avatarPath) {
+    celebAvatar.src = `file://${state.avatarPath}?t=${Date.now()}`;
+  }
 
   cards.hidden = false;
   cont.hidden = false;
