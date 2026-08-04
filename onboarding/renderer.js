@@ -33,6 +33,7 @@ function goToStep(n) {
 function showError(container, msg) {
   container.textContent = msg;
   container.hidden = false;
+  container.classList.remove('loading', 'ok');
   container.classList.add('error');
 }
 function hideError(container) {
@@ -70,16 +71,17 @@ async function runStep2() {
   const copyLogBtn = document.getElementById('hermes-copy-log');
   for (const b of [installBtn, retryBtn, quitBtn, copyLogBtn]) b.hidden = true;
   logBox.hidden = true;
-  container.textContent = 'Checking…';
-  container.className = 'state';
+  container.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Checking for Hermes…</span>';
+  container.className = 'state loading';
 
   const r = await window.onboarding.hermesDetect();
   if (r.present) {
     container.textContent = `Hermes is installed. (${r.version || 'version unknown'})`;
-    container.classList.add('ok');
+    container.className = 'state ok';
     setTimeout(() => window.goToStep(3), 800);
     return;
   }
+  container.className = 'state';
   container.textContent =
     'Circe needs Hermes to run agents. I can install it for you now (~30 seconds).';
   installBtn.hidden = false;
@@ -97,18 +99,18 @@ async function runStep2() {
       const d = await window.onboarding.hermesDetect();
       if (d.present) {
         container.textContent = `Hermes installed (${d.version || ''}). Continuing…`;
-        container.classList.add('ok');
+        container.className = 'state ok';
         setTimeout(() => window.goToStep(3), 800);
         return;
       }
       container.textContent = 'Restart Circe to pick up the new install.';
-      container.classList.add('error');
+      container.className = 'state error';
       quitBtn.hidden = false;
       quitBtn.onclick = () => window.close();
       return;
     }
     container.textContent = res.error || 'Install failed.';
-    container.classList.add('error');
+    container.className = 'state error';
     retryBtn.hidden = false;
     copyLogBtn.hidden = false;
     retryBtn.onclick = () => runStep2();
@@ -160,15 +162,15 @@ async function runStep3() {
 
   async function verifyAndAdvance(token, kind) {
     verifyState.hidden = false;
-    verifyState.className = 'state';
-    verifyState.textContent = 'Verifying with Bedrock…';
+    verifyState.className = 'state loading';
+    verifyState.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Verifying with Bedrock…</span>';
     errActions.hidden = true;
     const r = await window.onboarding.bedrockVerifyDirect(token);
     if (r.ok) {
       state.bedrockToken = token;
       state.bedrockCase = kind;
+      verifyState.className = 'state ok';
       verifyState.textContent = 'Bedrock says: works. ✓';
-      verifyState.classList.add('ok');
       setTimeout(() => window.goToStep(4), 700);
       return;
     }
