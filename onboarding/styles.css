@@ -81,6 +81,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .state.error { background: #fef0f0; color: #a12; }
 .state.ok { background: #edf7ec; color: #276b1e; }
 .state.loading { display: flex; align-items: center; gap: 10px; }
+.state[hidden] { display: none; }
 .spinner {
   display: inline-block;
   width: 16px;
