@@ -1,5 +1,6 @@
 const BEDROCK_URL =
-  'https://bedrock-mantle.us-east-1.api.aws/anthropic/chat/completions';
+  'https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages';
+const ANTHROPIC_VERSION = '2023-06-01';
 const MODEL = 'anthropic.claude-sonnet-5';
 
 const AUTH_ERROR_COPY =
@@ -18,6 +19,7 @@ async function callBedrock({ apiKey, body, fetchImpl }) {
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
+      'anthropic-version': ANTHROPIC_VERSION,
     },
     body: JSON.stringify(body),
   });
