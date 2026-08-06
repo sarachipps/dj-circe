@@ -49,12 +49,39 @@ async function fetchImageBytes(url, fetchImpl) {
   }
 }
 
+// Wikipedia's title search happily returns "Xavier Zazueta" for a "Zazu"
+// query and "William Golding" for a "Piggy" query — real people whose article
+// has a photo, unrelated to the character. Require the candidate's tokens to
+// match the requested name's tokens (order-insensitive, parenthetical
+// disambiguators stripped) so we bail to initials rather than mislabel a
+// stranger as the user's Orchestrator.
+const STOPWORDS = new Set(['the', 'of', 'a', 'an', 'and', 'de', 'la', 'le']);
+function tokenize(s) {
+  return String(s || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !STOPWORDS.has(t));
+}
+function titleMatchesQuery(query, title) {
+  const q = tokenize(query);
+  const t = tokenize(title);
+  if (!q.length || !t.length) return false;
+  const qs = new Set(q);
+  const ts = new Set(t);
+  if (qs.size !== ts.size) return false;
+  for (const tok of qs) if (!ts.has(tok)) return false;
+  return true;
+}
+
 async function fetchLeadImage(characterName, { fetchImpl } = {}) {
   const doFetch = fetchImpl || fetch;
   const titles = await searchTitles(characterName, doFetch);
   for (const title of titles) {
+    if (!titleMatchesQuery(characterName, title)) continue;
     const summary = await fetchSummary(title, doFetch);
     if (!summary) continue;
+    if (summary.type === 'disambiguation') continue;
     const imgUrl =
       (summary.originalimage && summary.originalimage.source) || null;
     if (!imgUrl) continue;

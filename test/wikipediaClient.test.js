@@ -83,33 +83,100 @@ test('fetchLeadImage: falls through to next candidate when first has no image', 
       '/search/title',
       {
         status: 200,
-        body: { pages: [{ title: 'NoImagePage' }, { title: 'HasImagePage' }] },
-      },
-    ],
-    [
-      '/page/summary/NoImagePage',
-      {
-        status: 200,
         body: {
-          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/NoImagePage' } },
+          pages: [
+            { title: 'Some Character' },
+            { title: 'Some Character (novel)' },
+          ],
         },
       },
     ],
     [
-      '/page/summary/HasImagePage',
+      /\/page\/summary\/Some%20Character%20\(novel\)/,
       {
         status: 200,
         body: {
           originalimage: { source: 'https://upload.wikimedia.org/hasimage.png' },
-          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/HasImagePage' } },
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Some_Character_(novel)' } },
+        },
+      },
+    ],
+    [
+      /\/page\/summary\/Some%20Character$/,
+      {
+        status: 200,
+        body: {
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Some_Character' } },
         },
       },
     ],
     ['upload.wikimedia.org/hasimage.png', { bytes }],
   ]);
-  const r = await fetchLeadImage('ambiguous', { fetchImpl });
+  const r = await fetchLeadImage('Some Character', { fetchImpl });
   assert.ok(r);
-  assert.match(r.sourceUrl, /HasImagePage/);
+  assert.match(r.sourceUrl, /Some_Character_%28novel%29|Some_Character_\(novel\)/);
+});
+
+test('fetchLeadImage: rejects loosely-matching title (Xavier Zazueta for Zazu)', async () => {
+  // Regression: Wikipedia's title search returns unrelated real people whose
+  // article contains the query as a substring. Their photo must not become
+  // the Orchestrator's avatar.
+  const bytes = await mkPngBytes();
+  const fetchImpl = makeFetch([
+    [
+      '/search/title',
+      {
+        status: 200,
+        body: {
+          pages: [
+            { title: 'Zazu' },
+            { title: 'Xavier Zazueta' },
+            { title: 'Zazu Nova' },
+          ],
+        },
+      },
+    ],
+    [
+      '/page/summary/Zazu',
+      {
+        status: 200,
+        body: {
+          type: 'disambiguation',
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Zazu' } },
+        },
+      },
+    ],
+    // Xavier Zazueta would return an image if we asked — but we shouldn't.
+    ['/page/summary/Xavier%20Zazueta', { status: 200, body: { originalimage: { source: 'x' } } }],
+    ['/page/summary/Zazu%20Nova', { status: 200, body: { originalimage: { source: 'x' } } }],
+    ['upload.wikimedia.org', { bytes }],
+  ]);
+  const r = await fetchLeadImage('Zazu', { fetchImpl });
+  assert.strictEqual(r, null);
+});
+
+test('fetchLeadImage: skips disambiguation pages', async () => {
+  const bytes = await mkPngBytes();
+  const fetchImpl = makeFetch([
+    [
+      '/search/title',
+      { status: 200, body: { pages: [{ title: 'Ambiguous Name' }] } },
+    ],
+    [
+      '/page/summary/Ambiguous%20Name',
+      {
+        status: 200,
+        body: {
+          type: 'disambiguation',
+          originalimage: { source: 'https://upload.wikimedia.org/dis.png' },
+          content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Ambiguous_Name' } },
+        },
+      },
+    ],
+    ['upload.wikimedia.org/dis.png', { bytes }],
+  ]);
+  const r = await fetchLeadImage('Ambiguous Name', { fetchImpl });
+  assert.strictEqual(r, null);
 });
 
 test('fetchLeadImage: returns null on 404 from search', async () => {
