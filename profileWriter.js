@@ -109,7 +109,24 @@ async function writeFirstTasks(profileDir, content) {
 }
 
 async function writeBedrockConfig({ profileDir, apiKey }) {
+  // Register the same platform toolsets Circe's hand-tuned profiles use.
+  // Without these, Claude has no local scaffolding (no memory/todo/skills/
+  // terminal), which shows up as very slow turns because everything has to
+  // be reasoned from scratch.
   const yaml =
+    'platform_toolsets:\n' +
+    '  cli:\n' +
+    '    - clarify\n' +
+    '    - code_execution\n' +
+    '    - cronjob\n' +
+    '    - file\n' +
+    '    - kanban\n' +
+    '    - memory\n' +
+    '    - session_search\n' +
+    '    - skills\n' +
+    '    - terminal\n' +
+    '    - todo\n' +
+    '    - web\n' +
     'model:\n' +
     '  default: anthropic.claude-sonnet-5\n' +
     '  provider: dj-bedrock\n' +
