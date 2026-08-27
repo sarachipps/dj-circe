@@ -105,6 +105,12 @@ async function loadProfiles() {
     const name = m[1];
     const model = m[2];
     if (name === 'Profile' || name.startsWith('─')) continue;
+    // Hermes ships a built-in `default` scaffold with a boilerplate SOUL.md
+    // but no avatar. Circe onboarding writes avatar.{png,jpg,…} for every
+    // profile it creates, so use avatar presence as the "this is a real
+    // Circe tile" signal — otherwise a fresh install shows a blank tile
+    // next to the real Orchestrator.
+    if (name === 'default' && !hasAvatar(name)) continue;
     profiles.push({ name, model });
   }
   return profiles;
@@ -132,6 +138,17 @@ const AVATAR_MIMES = {
   gif: 'image/gif',
   webp: 'image/webp',
 };
+
+function hasAvatar(profileName) {
+  const root =
+    profileName === 'default'
+      ? HERMES_HOME
+      : path.join(HERMES_HOME, 'profiles', profileName);
+  for (const ext of Object.keys(AVATAR_MIMES)) {
+    if (fs.existsSync(path.join(root, `avatar.${ext}`))) return true;
+  }
+  return false;
+}
 
 function loadAvatarDataUrl(profileName) {
   const roots =
@@ -318,6 +335,20 @@ if (process.argv.includes('--reset-onboarding')) {
   }
 }
 
+async function openAllTiles() {
+  const profiles = await loadProfiles();
+  if (!profiles.length) {
+    throw new Error('No Hermes profiles found.');
+  }
+  log.info(`Loaded ${profiles.length} profile(s): ${profiles.map((p) => p.name).join(', ')}`);
+  profiles.forEach((p, i) => {
+    if (openProfiles.has(p.name)) return;
+    openProfiles.add(p.name);
+    createTileWindow(p, i);
+  });
+  watchProfilesDir();
+}
+
 app.whenReady().then(async () => {
   log.info('app ready');
 
@@ -330,6 +361,12 @@ app.whenReady().then(async () => {
         hermesBin: HERMES_BIN,
         log,
         logFilePath: log.transports.file.getFile().path,
+        // Open tiles BEFORE the wizard window closes, otherwise Electron sees
+        // zero windows and `window-all-closed` quits the app mid-handoff.
+        onBeforeClose: async () => {
+          Object.assign(stateCache, loadStateFile());
+          await openAllTiles();
+        },
       });
       if (!result.completed) {
         log.info('Onboarding closed before completion — quitting.');
@@ -337,8 +374,7 @@ app.whenReady().then(async () => {
         return;
       }
       log.info(`Onboarding complete. Orchestrator profile: ${result.orchestratorProfile}`);
-      // Reload the state cache so subsequent tile code sees the fresh state.json.
-      Object.assign(stateCache, loadStateFile());
+      return;
     } catch (err) {
       log.error('Onboarding failed:', err.message);
       app.quit();
@@ -347,18 +383,7 @@ app.whenReady().then(async () => {
   }
 
   try {
-    const profiles = await loadProfiles();
-    if (!profiles.length) {
-      log.error('No Hermes profiles found.');
-      app.quit();
-      return;
-    }
-    log.info(`Loaded ${profiles.length} profile(s): ${profiles.map((p) => p.name).join(', ')}`);
-    profiles.forEach((p, i) => {
-      openProfiles.add(p.name);
-      createTileWindow(p, i);
-    });
-    watchProfilesDir();
+    await openAllTiles();
   } catch (err) {
     log.error('Failed to load profiles:', err.message);
     app.quit();

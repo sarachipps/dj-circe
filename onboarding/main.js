@@ -179,7 +179,7 @@ function writeStateComplete(stateDir, slug) {
   fs.writeFileSync(stateFile, JSON.stringify(existing, null, 2));
 }
 
-async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
+async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath, onBeforeClose }) {
   const soulTemplate = readTemplate(SOUL_TEMPLATE_PATH);
   const firstTasksTemplate = readTemplate(FIRST_TASKS_TEMPLATE_PATH);
 
@@ -374,6 +374,15 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath }) {
         return { ok: false, error: err.message };
       }
       finishState = { completed: true, orchestratorProfile: slug };
+      // Spawn tiles before destroying the wizard so `window-all-closed`
+      // never fires with zero windows and quits the app.
+      if (typeof onBeforeClose === 'function') {
+        try {
+          await onBeforeClose(slug);
+        } catch (err) {
+          return { ok: false, error: err.message };
+        }
+      }
       setImmediate(() => {
         cleanup();
         if (!win.isDestroyed()) win.destroy();
