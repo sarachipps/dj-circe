@@ -21,11 +21,12 @@ If you don't have those yet, do the Claude Code setup first:
 You also need:
 
 - **Node 20+** and **npm**
-- **Hermes CLI** at `~/.local/bin/hermes`. If missing:
+- **Hermes.** You don't have to install it yourself — Step 2 of the
+  onboarding wizard detects Hermes and installs it in place if it's
+  missing. If you'd rather do it up front:
   ```bash
   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
   ```
-  (The onboarding wizard can install it for you on Step 2 if it isn't there.)
 
 ## Install
 
