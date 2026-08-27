@@ -47,8 +47,36 @@ test('detect: returns present=false when hermes exits nonzero', async (t) => {
   assert.strictEqual(result.present, false);
 });
 
-test('install: returns actionable placeholder error in v1', async () => {
+test('install: resolves ok:true on exit code 0', async (t) => {
+  stubSpawn(t, () => fakeChild({ stdout: 'installed\n', code: 0 }));
+  const result = await install(() => {});
+  assert.deepStrictEqual(result, { ok: true });
+});
+
+test('install: emits each non-empty stdout line to onProgress', async (t) => {
+  stubSpawn(t, () => fakeChild({ stdout: 'first\nsecond\n\nthird\n', code: 0 }));
+  const lines = [];
+  await install((line) => lines.push(line));
+  assert.deepStrictEqual(lines, ['first', 'second', 'third']);
+});
+
+test('install: emits stderr lines through the same onProgress channel', async (t) => {
+  stubSpawn(t, () => fakeChild({ stderr: 'warning\n', code: 0 }));
+  const lines = [];
+  await install((line) => lines.push(line));
+  assert.deepStrictEqual(lines, ['warning']);
+});
+
+test('install: resolves ok:false with exit code on nonzero exit', async (t) => {
+  stubSpawn(t, () => fakeChild({ stderr: 'boom\n', code: 42 }));
   const result = await install(() => {});
   assert.strictEqual(result.ok, false);
-  assert.match(result.error, /manually/i);
+  assert.match(result.error, /42/);
+});
+
+test('install: resolves ok:false when spawn emits error event', async (t) => {
+  stubSpawn(t, () => fakeChild({ err: new Error('spawn ENOENT bash') }));
+  const result = await install(() => {});
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /ENOENT/);
 });
