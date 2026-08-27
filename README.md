@@ -20,7 +20,18 @@ If you don't have those yet, do the Claude Code setup first:
 
 You also need:
 
-- **Node 20+** and **npm**
+- **Node 20+** and **npm.** If you don't have them, on macOS the easiest
+  path is Homebrew:
+  ```bash
+  brew install node
+  ```
+  Verify:
+  ```bash
+  node --version   # v20.x or newer
+  npm --version
+  ```
+  No Homebrew? Grab the LTS installer from <https://nodejs.org> — the
+  `.pkg` puts both `node` and `npm` on your PATH.
 - **Hermes.** You don't have to install it yourself — Step 2 of the
   onboarding wizard detects Hermes and installs it in place if it's
   missing. If you'd rather do it up front:
