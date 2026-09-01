@@ -6,6 +6,7 @@ const os = require('os');
 const log = require('electron-log/main');
 const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded } = require('./onboarding/main');
+const { loadProfiles: loadProfilesFromList } = require('./profileList');
 
 app.setName('Circe');
 log.initialize();
@@ -95,25 +96,7 @@ function runHermes(args) {
 }
 
 async function loadProfiles() {
-  const out = await runHermes(['profile', 'list']);
-  const profiles = [];
-  for (const raw of out.split('\n')) {
-    const line = raw.replace(/\x1b\[[0-9;]*m/g, '');
-    if (!/^\s*[◆◇•\s]/.test(line)) continue;
-    const m = line.match(/^\s*[◆◇•]?\s*([A-Za-z0-9_-]+)\s+(\S+)/);
-    if (!m) continue;
-    const name = m[1];
-    const model = m[2];
-    if (name === 'Profile' || name.startsWith('─')) continue;
-    // Hermes ships a built-in `default` scaffold with a boilerplate SOUL.md
-    // but no avatar. Circe onboarding writes avatar.{png,jpg,…} for every
-    // profile it creates, so use avatar presence as the "this is a real
-    // Circe tile" signal — otherwise a fresh install shows a blank tile
-    // next to the real Orchestrator.
-    if (name === 'default' && !hasAvatar(name)) continue;
-    profiles.push({ name, model });
-  }
-  return profiles;
+  return loadProfilesFromList(runHermes, HERMES_HOME);
 }
 
 function readDisplayName(profileName) {
@@ -138,17 +121,6 @@ const AVATAR_MIMES = {
   gif: 'image/gif',
   webp: 'image/webp',
 };
-
-function hasAvatar(profileName) {
-  const root =
-    profileName === 'default'
-      ? HERMES_HOME
-      : path.join(HERMES_HOME, 'profiles', profileName);
-  for (const ext of Object.keys(AVATAR_MIMES)) {
-    if (fs.existsSync(path.join(root, `avatar.${ext}`))) return true;
-  }
-  return false;
-}
 
 function loadAvatarDataUrl(profileName) {
   const roots =
