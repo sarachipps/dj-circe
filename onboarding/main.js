@@ -16,13 +16,34 @@ function readTemplate(p) {
   return fs.readFileSync(p, 'utf8');
 }
 
-function firstRunNeeded(stateDir) {
+// Returns 'skip' | 'wizard' | 'adopt'.
+//   skip   — state.firstRunComplete === true (normal launch)
+//   wizard — no completion flag AND no existing user profiles (brand new)
+//   adopt  — no completion flag BUT profiles exist (upgrade over legacy state)
+function firstRunNeeded(stateDir, hermesHome) {
+  let firstRunComplete = false;
   try {
     const s = JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8'));
-    return s.firstRunComplete !== true;
+    firstRunComplete = s.firstRunComplete === true;
+  } catch {}
+  if (firstRunComplete) return 'skip';
+  const realProfiles = listRealProfiles(hermesHome);
+  if (realProfiles.length > 0) return 'adopt';
+  return 'wizard';
+}
+
+function listRealProfiles(hermesHome) {
+  const dir = path.join(hermesHome, 'profiles');
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return true;
+    return [];
   }
+  return entries
+    .filter((e) => e.isDirectory() && e.name !== '_scratch')
+    .map((e) => e.name)
+    .sort();
 }
 
 function detectClaudeCodeToken() {
@@ -398,4 +419,4 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath, onB
   });
 }
 
-module.exports = { runOnboarding, firstRunNeeded };
+module.exports = { runOnboarding, firstRunNeeded, listRealProfiles };

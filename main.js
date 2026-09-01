@@ -5,7 +5,7 @@ const { spawn } = require('child_process');
 const os = require('os');
 const log = require('electron-log/main');
 const { AcpClient } = require('./acpClient');
-const { runOnboarding, firstRunNeeded } = require('./onboarding/main');
+const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
 
 app.setName('Circe');
@@ -321,10 +321,25 @@ async function openAllTiles() {
   watchProfilesDir();
 }
 
+function adoptLegacyState() {
+  const real = listRealProfiles(HERMES_HOME);
+  const orchestrator = real[0];
+  const s = loadStateFile();
+  s.firstRunComplete = true;
+  s.orchestratorProfile = orchestrator;
+  writeStateFile(s);
+  Object.assign(stateCache, s);
+  log.info(
+    `Adopted ${real.length} existing profile(s); wizard skipped. ` +
+    `orchestratorProfile=${orchestrator}`,
+  );
+}
+
 app.whenReady().then(async () => {
   log.info('app ready');
 
-  if (firstRunNeeded(STATE_DIR)) {
+  const mode = firstRunNeeded(STATE_DIR, HERMES_HOME);
+  if (mode === 'wizard') {
     log.info('First-run: launching onboarding wizard');
     try {
       const result = await runOnboarding({
@@ -333,8 +348,6 @@ app.whenReady().then(async () => {
         hermesBin: HERMES_BIN,
         log,
         logFilePath: log.transports.file.getFile().path,
-        // Open tiles BEFORE the wizard window closes, otherwise Electron sees
-        // zero windows and `window-all-closed` quits the app mid-handoff.
         onBeforeClose: async () => {
           Object.assign(stateCache, loadStateFile());
           await openAllTiles();
@@ -349,6 +362,16 @@ app.whenReady().then(async () => {
       return;
     } catch (err) {
       log.error('Onboarding failed:', err.message);
+      app.quit();
+      return;
+    }
+  }
+
+  if (mode === 'adopt') {
+    try {
+      adoptLegacyState();
+    } catch (err) {
+      log.error('Adoption failed:', err.message);
       app.quit();
       return;
     }
