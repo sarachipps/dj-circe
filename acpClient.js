@@ -11,13 +11,14 @@ try {
 }
 
 const HERMES_BIN = path.join(os.homedir(), '.local', 'bin', 'hermes');
+const HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
 
 // Parse a Hermes-style .env file (KEY=value per line, no `export` prefix, no
 // interpolation, `#` and blank lines ignored). Values may be single- or
 // double-quoted. Returns {} on any read/parse failure — spawn continues
 // with whatever env is already present.
 function loadProfileEnv(profile) {
-  const envPath = path.join(os.homedir(), '.hermes', 'profiles', profile, '.env');
+  const envPath = path.join(HERMES_HOME, 'profiles', profile, '.env');
   try {
     const raw = fs.readFileSync(envPath, 'utf8');
     const out = {};
@@ -344,4 +345,4 @@ class AcpClient {
   }
 }
 
-module.exports = { AcpClient };
+module.exports = { AcpClient, __loadProfileEnvForTest: loadProfileEnv };
