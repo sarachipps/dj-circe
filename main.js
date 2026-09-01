@@ -432,7 +432,20 @@ ipcMain.handle('acp:newSession', async (evt) => {
   const client = tileClients.get(evt.sender.id);
   if (!client) throw new Error('no ACP client for this window');
   try {
-    const sessionId = await client.newSession();
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    const sessionId = await client.newSession({
+      onRetry: (n, err) => {
+        if (win && !win.isDestroyed()) {
+          evt.sender.send('acp:retryStatus', {
+            phase: 'newSession',
+            attempt: n,
+            max: 3,
+            code: err.code,
+            message: err.message,
+          });
+        }
+      },
+    });
     return { sessionId };
   } catch (err) {
     log.error(`acp:newSession failed`, err);

@@ -124,3 +124,110 @@ test('acpClient: rejection uses fallback message when payload.message missing', 
   assert.strictEqual(err.message, 'rpc error');
   assert.strictEqual(err.code, -32000);
 });
+
+test('acpClient.newSession: retries on -32603 then succeeds', async (t) => {
+  // Fake the transport by intercepting _send.
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  const originalSend = c._send.bind(c);
+  c._send = async (method, params) => {
+    if (method === 'session/new') {
+      calls++;
+      if (calls < 2) {
+        const err = new Error('Internal error');
+        err.code = -32603;
+        throw err;
+      }
+      return { sessionId: 'sess-ok' };
+    }
+    return originalSend(method, params);
+  };
+  const id = await c.newSession({ backoffMs: [1, 1] });
+  assert.strictEqual(id, 'sess-ok');
+  assert.strictEqual(calls, 2);
+});
+
+test('acpClient.newSession: fails immediately on -32601 (method not found)', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  c._send = async () => {
+    calls++;
+    const err = new Error('method not found');
+    err.code = -32601;
+    throw err;
+  };
+  const err = await c.newSession().catch((e) => e);
+  assert.strictEqual(err.code, -32601);
+  assert.strictEqual(calls, 1);
+});
+
+test('acpClient.newSession: fails immediately on auth-shaped data', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  c._send = async () => {
+    calls++;
+    const err = new Error('Internal error');
+    err.code = -32603;
+    err.data = { detail: 'Invalid token: expired' };
+    throw err;
+  };
+  const err = await c.newSession().catch((e) => e);
+  assert.strictEqual(err.code, -32603);
+  assert.strictEqual(calls, 1);
+});
+
+test('acpClient.newSession: does not retry when subprocess exited', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  c._send = async () => {
+    calls++;
+    throw new Error('hermes acp exited (1)');
+  };
+  const err = await c.newSession().catch((e) => e);
+  assert.match(err.message, /hermes acp exited/);
+  assert.strictEqual(calls, 1);
+});
+
+test('acpClient.newSession: CIRCE_NO_RETRY=1 disables retries', async (t) => {
+  const original = process.env.CIRCE_NO_RETRY;
+  process.env.CIRCE_NO_RETRY = '1';
+  t.after(() => {
+    if (original === undefined) delete process.env.CIRCE_NO_RETRY;
+    else process.env.CIRCE_NO_RETRY = original;
+  });
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  c._send = async () => {
+    calls++;
+    const err = new Error('Internal error');
+    err.code = -32603;
+    throw err;
+  };
+  const err = await c.newSession().catch((e) => e);
+  assert.strictEqual(err.code, -32603);
+  assert.strictEqual(calls, 1);
+});
+
+test('acpClient.newSession: onRetry fires with attempt number and error', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  let calls = 0;
+  c._send = async () => {
+    calls++;
+    if (calls < 3) {
+      const err = new Error('Internal error');
+      err.code = -32603;
+      throw err;
+    }
+    return { sessionId: 'sess-x' };
+  };
+  const retries = [];
+  const id = await c.newSession({ backoffMs: [1, 1], onRetry: (n, err) => retries.push({ n, code: err.code }) });
+  assert.strictEqual(id, 'sess-x');
+  assert.deepStrictEqual(retries, [{ n: 2, code: -32603 }, { n: 3, code: -32603 }]);
+});

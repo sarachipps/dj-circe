@@ -352,7 +352,7 @@ function persistState() {
         defaultLabel: t.defaultLabel,
         firstUserText: t.firstUserText,
         messages: t.messages
-          .filter((m) => m.role !== 'tool' && m.role !== 'permission')
+          .filter((m) => m.role !== 'tool' && m.role !== 'permission' && m.cls !== 'retry')
           .map((m) => ({ role: m.role, text: m.text, cls: m.cls || '' })),
       })),
     };
@@ -448,6 +448,16 @@ window.hermes.onError(({ message }) => {
   const tab = tabsById.get(activeTabId) || tabs[0];
   if (tab) appendMessage(tab, 'agent', message || 'ACP error', 'error');
 });
+
+if (window.hermes.onRetryStatus) {
+  window.hermes.onRetryStatus((params) => {
+    const tab = activeTab();
+    if (!tab) return;
+    // Transient status: append but flag as 'retry' so persistState skips it.
+    const text = `Retrying session start… (attempt ${params.attempt}/${params.max})`;
+    appendMessage(tab, 'agent', text, 'retry');
+  });
+}
 
 window.hermes.onExit(({ code }) => {
   for (const tab of tabs) {

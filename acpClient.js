@@ -2,6 +2,18 @@ const { spawn } = require('child_process');
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const { retryable } = require('./retryUtil');
+
+function isRetryableAcpError(err) {
+  if (!err) return false;
+  if (/hermes acp exited/.test(err.message || '')) return false;
+  if (err.code === -32601 || err.code === -32602) return false;
+  const detail = (err.data && (err.data.detail || err.data.message)) || '';
+  if (/unauthorized|forbidden|invalid token|expired/i.test(String(detail))) return false;
+  if (err.code === -32603) return true;
+  if (err.code === undefined) return true; // network/socket blip
+  return false;
+}
 
 let log;
 try {
@@ -168,12 +180,25 @@ class AcpClient {
     return this._ready;
   }
 
-  async newSession() {
+  async newSession(opts = {}) {
     await this._ready;
-    const r = await this._send('session/new', {
-      cwd: this.cwd,
-      mcpServers: [],
-    });
+    const disabled = process.env.CIRCE_NO_RETRY === '1';
+    const backoffMs = opts.backoffMs || [500, 1500];
+    const r = await retryable(
+      () => this._send('session/new', { cwd: this.cwd, mcpServers: [] }),
+      {
+        attempts: 3,
+        backoffMs,
+        isRetryable: isRetryableAcpError,
+        onAttempt: (n, err) => {
+          if (typeof opts.onRetry === 'function') opts.onRetry(n, err);
+          try {
+            log.warn(`acp newSession retry [${this.profile}] attempt=${n} code=${err.code} msg=${err.message}`);
+          } catch {}
+        },
+        disabled,
+      },
+    );
     return r.sessionId;
   }
 
