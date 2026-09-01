@@ -25,23 +25,50 @@ async function callBedrock({ apiKey, body, fetchImpl }) {
   });
 }
 
-async function verify(apiKey, fetchImpl) {
+const { retryable } = require('./retryUtil');
+
+class NetworkError extends Error {
+  constructor(cause) {
+    super(cause && cause.message ? cause.message : String(cause));
+    this.name = 'NetworkError';
+  }
+}
+
+async function verify(apiKey, fetchImpl, opts = {}) {
   const body = {
     model: MODEL,
     max_tokens: 1,
     messages: [{ role: 'user', content: 'ok' }],
   };
-  let res;
+  const disabled = process.env.CIRCE_NO_RETRY === '1';
+  const backoffMs = opts.backoffMs || [1000];
   try {
-    res = await callBedrock({ apiKey, body, fetchImpl });
+    const res = await retryable(
+      async () => {
+        try {
+          return await callBedrock({ apiKey, body, fetchImpl });
+        } catch (err) {
+          throw new NetworkError(err);
+        }
+      },
+      {
+        attempts: 2,
+        backoffMs,
+        isRetryable: (err) => err instanceof NetworkError,
+        onAttempt: (n, err) => {
+          if (typeof opts.onRetry === 'function') opts.onRetry(n, err);
+        },
+        disabled,
+      },
+    );
+    if (res.ok) return { ok: true };
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: AUTH_ERROR_COPY, kind: 'auth' };
+    }
+    return { ok: false, error: UNKNOWN_ERROR_COPY(res.status), kind: 'unknown' };
   } catch (err) {
     return { ok: false, error: NETWORK_ERROR_COPY, kind: 'network' };
   }
-  if (res.ok) return { ok: true };
-  if (res.status === 401 || res.status === 403) {
-    return { ok: false, error: AUTH_ERROR_COPY, kind: 'auth' };
-  }
-  return { ok: false, error: UNKNOWN_ERROR_COPY(res.status), kind: 'unknown' };
 }
 
 function buildSystemPrompt(soulTemplate) {

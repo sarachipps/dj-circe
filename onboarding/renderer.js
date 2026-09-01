@@ -177,7 +177,9 @@ async function runStep3() {
     verifyState.className = 'state loading';
     verifyState.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Verifying with Bedrock…</span>';
     errActions.hidden = true;
-    const r = await window.onboarding.bedrockVerifyDirect(token);
+    const r = await window.onboarding.bedrockVerifyDirect(token, () => {
+      verifyState.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Retrying Bedrock verification…</span>';
+    });
     if (r.ok) {
       state.bedrockToken = token;
       state.bedrockCase = kind;

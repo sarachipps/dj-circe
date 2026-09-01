@@ -247,8 +247,18 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath, onB
   });
 
   on('onboarding:bedrockDetectClaudeCode', async () => detectClaudeCodeToken());
-  on('onboarding:bedrockVerifyDirect', async (_e, { apiKey }) =>
-    bedrockClient.verify(apiKey),
+  on('onboarding:bedrockVerifyDirect', async (evt, { apiKey }) =>
+    bedrockClient.verify(apiKey, undefined, {
+      onRetry: (n, err) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('onboarding:bedrockVerify:retry', {
+            attempt: n,
+            max: 2,
+            message: err.message,
+          });
+        }
+      },
+    }),
   );
 
   on('onboarding:bedrockVerifyHermes', async (_e, { slug }) =>

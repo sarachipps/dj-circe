@@ -147,3 +147,68 @@ test('pickCharacter: 401 from Bedrock → returns error', async () => {
   assert.ok(r.error);
   assert.match(r.error, /auth|401|unauth/i);
 });
+
+test('verify: retries once on network error then succeeds', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) throw new Error('ECONNRESET');
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+  };
+  const retries = [];
+  const r = await verify('sk-test', fetchImpl, {
+    backoffMs: [1],
+    onRetry: (n, err) => retries.push({ n, msg: err.message }),
+  });
+  assert.deepStrictEqual(r, { ok: true });
+  assert.strictEqual(calls, 2);
+  assert.deepStrictEqual(retries, [{ n: 2, msg: 'ECONNRESET' }]);
+});
+
+test('verify: does not retry on 401', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return { ok: false, status: 401, json: async () => ({}), text: async () => '{}' };
+  };
+  const r = await verify('sk-test', fetchImpl, { backoffMs: [1] });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.kind, 'auth');
+  assert.strictEqual(calls, 1);
+});
+
+test('verify: does not retry on 500', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return { ok: false, status: 500, json: async () => ({}), text: async () => '{}' };
+  };
+  const r = await verify('sk-test', fetchImpl, { backoffMs: [1] });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.kind, 'unknown');
+  assert.strictEqual(calls, 1);
+});
+
+test('verify: two network errors → returns network error', async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; throw new Error('EHOSTUNREACH'); };
+  const r = await verify('sk-test', fetchImpl, { backoffMs: [1] });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.kind, 'network');
+  assert.strictEqual(calls, 2);
+});
+
+test('verify: CIRCE_NO_RETRY=1 disables retries', async (t) => {
+  const original = process.env.CIRCE_NO_RETRY;
+  process.env.CIRCE_NO_RETRY = '1';
+  t.after(() => {
+    if (original === undefined) delete process.env.CIRCE_NO_RETRY;
+    else process.env.CIRCE_NO_RETRY = original;
+  });
+  let calls = 0;
+  const fetchImpl = async () => { calls++; throw new Error('boom'); };
+  const r = await verify('sk-test', fetchImpl, { backoffMs: [1] });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.kind, 'network');
+  assert.strictEqual(calls, 1);
+});

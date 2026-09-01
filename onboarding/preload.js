@@ -20,8 +20,13 @@ contextBridge.exposeInMainWorld('onboarding', {
   },
   bedrockDetectClaudeCode: () =>
     ipcRenderer.invoke('onboarding:bedrockDetectClaudeCode'),
-  bedrockVerifyDirect: (apiKey) =>
-    ipcRenderer.invoke('onboarding:bedrockVerifyDirect', { apiKey }),
+  bedrockVerifyDirect: (apiKey, onRetry) => {
+    const listener = (_e, p) => onRetry && onRetry(p);
+    ipcRenderer.on('onboarding:bedrockVerify:retry', listener);
+    return ipcRenderer.invoke('onboarding:bedrockVerifyDirect', { apiKey }).finally(() => {
+      ipcRenderer.removeListener('onboarding:bedrockVerify:retry', listener);
+    });
+  },
   bedrockVerifyHermes: (slug) =>
     ipcRenderer.invoke('onboarding:bedrockVerifyHermes', { slug }),
   pickCharacter: (args) =>
