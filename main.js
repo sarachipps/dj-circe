@@ -7,6 +7,7 @@ const log = require('electron-log/main');
 const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
+const { setupCaTrust } = require('./caTrust');
 
 app.setName('Circe');
 log.initialize();
@@ -340,6 +341,11 @@ function adoptLegacyState() {
 
 app.whenReady().then(async () => {
   log.info('app ready');
+  await setupCaTrust({
+    userDataDir: app.getPath('userData'),
+    hermesBin: HERMES_BIN,
+    log,
+  });
 
   const mode = firstRunNeeded(STATE_DIR, HERMES_HOME);
   if (mode === 'wizard') {
