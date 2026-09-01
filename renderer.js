@@ -25,6 +25,24 @@ function setMessageContent(el, role, text) {
   el.textContent = text;
 }
 
+function formatAcpError(err) {
+  const raw = err && (err.message || String(err));
+  if (!raw) return 'ACP error';
+  // If main.js wrapped a structured error, message is JSON.
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.message) {
+      const parts = [parsed.message];
+      const detail =
+        (parsed.data && (parsed.data.detail || parsed.data.traceback)) || null;
+      if (detail) parts.push(String(detail));
+      if (parsed.code !== undefined) parts.push(`(code ${parsed.code})`);
+      return parts.join('\n\n');
+    }
+  } catch {}
+  return raw;
+}
+
 const transcript = document.getElementById('transcript');
 const input = document.getElementById('input');
 const form = document.getElementById('composer');
@@ -316,7 +334,7 @@ async function createTab({
   } catch (err) {
     tab.replaying = false;
     tab.starting = false;
-    appendMessage(tab, 'agent', err.message || String(err), 'error');
+    appendMessage(tab, 'agent', formatAcpError(err), 'error');
   }
   persistState();
   return tab;
@@ -606,7 +624,7 @@ form.addEventListener('submit', async (e) => {
     await window.hermes.prompt(tab.sessionId, text);
   } catch (err) {
     if (!tab.cancelling) {
-      appendMessage(tab, 'agent', err.message || String(err), 'error');
+      appendMessage(tab, 'agent', formatAcpError(err), 'error');
     }
   } finally {
     if (!tab.cancelling) {

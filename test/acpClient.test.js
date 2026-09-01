@@ -76,3 +76,51 @@ test('loadProfileEnv: strips quotes and skips comments', (t) => {
   assert.strictEqual(env.B, 'sq');
   assert.strictEqual(env.C, 'raw');
 });
+
+const { AcpClient } = require('../acpClient');
+
+function makeClientAndFeed(chunks) {
+  const c = new AcpClient({ profile: 'testp', onUpdate: () => {} });
+  // Reach into internal state — we're testing error plumbing, not spawn.
+  const p = new Promise((resolve, reject) => {
+    c._pending.set(42, { resolve, reject });
+  });
+  for (const chunk of chunks) c._onStdout(chunk);
+  return p;
+}
+
+test('acpClient: rejection carries code and data from JSON-RPC error', async () => {
+  const payload = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 42,
+    error: { code: -32603, message: 'Internal error', data: { detail: 'boom', traceback: 'File "x.py"...' } },
+  }) + '\n';
+  const err = await makeClientAndFeed([payload]).catch((e) => e);
+  assert.ok(err instanceof Error);
+  assert.strictEqual(err.message, 'Internal error');
+  assert.strictEqual(err.code, -32603);
+  assert.deepStrictEqual(err.data, { detail: 'boom', traceback: 'File "x.py"...' });
+});
+
+test('acpClient: rejection preserves undefined code/data when absent', async () => {
+  const payload = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 42,
+    error: { message: 'minimal' },
+  }) + '\n';
+  const err = await makeClientAndFeed([payload]).catch((e) => e);
+  assert.strictEqual(err.message, 'minimal');
+  assert.strictEqual(err.code, undefined);
+  assert.strictEqual(err.data, undefined);
+});
+
+test('acpClient: rejection uses fallback message when payload.message missing', async () => {
+  const payload = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 42,
+    error: { code: -32000 },
+  }) + '\n';
+  const err = await makeClientAndFeed([payload]).catch((e) => e);
+  assert.strictEqual(err.message, 'rpc error');
+  assert.strictEqual(err.code, -32000);
+});

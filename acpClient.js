@@ -7,7 +7,11 @@ let log;
 try {
   log = require('electron-log/main');
 } catch (_) {
-  log = { info: (...a) => console.log(...a), warn: (...a) => console.warn(...a) };
+  log = {
+    info: (...a) => console.log(...a),
+    warn: (...a) => console.warn(...a),
+    error: (...a) => console.error(...a),
+  };
 }
 
 const HERMES_BIN = path.join(os.homedir(), '.local', 'bin', 'hermes');
@@ -332,7 +336,13 @@ class AcpClient {
         const p = this._pending.get(msg.id);
         if (!p) continue;
         this._pending.delete(msg.id);
-        if (msg.error) p.reject(new Error(msg.error.message || 'rpc error'));
+        if (msg.error) {
+          const err = new Error(msg.error.message || 'rpc error');
+          err.code = msg.error.code;
+          err.data = msg.error.data;
+          log.error(`acp rpc error [${this.profile}]`, msg.error);
+          p.reject(err);
+        }
         else p.resolve(msg.result);
       } else if (msg.method === 'session/update' && msg.params) {
         try {

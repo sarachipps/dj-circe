@@ -423,11 +423,28 @@ ipcMain.handle('state:save', (evt, tabsState) => {
   writeStateFile(stateCache);
 });
 
+function serializeAcpError(err) {
+  const payload = { message: err.message || String(err) };
+  if (err.code !== undefined) payload.code = err.code;
+  if (err.data !== undefined) payload.data = err.data;
+  return payload;
+}
+
 ipcMain.handle('acp:newSession', async (evt) => {
   const client = tileClients.get(evt.sender.id);
   if (!client) throw new Error('no ACP client for this window');
-  const sessionId = await client.newSession();
-  return { sessionId };
+  try {
+    const sessionId = await client.newSession();
+    return { sessionId };
+  } catch (err) {
+    log.error(`acp:newSession failed`, err);
+    // Encode structured detail in the thrown message so Electron's default
+    // IPC error serializer (which drops non-message fields) still delivers it.
+    // Renderer parses via JSON.parse fallback in renderer.js.
+    const e = new Error(JSON.stringify(serializeAcpError(err)));
+    e.name = 'AcpError';
+    throw e;
+  }
 });
 
 ipcMain.handle('acp:loadSession', async (evt, { sessionId }) => {
@@ -438,15 +455,22 @@ ipcMain.handle('acp:loadSession', async (evt, { sessionId }) => {
     return { ok: true, sessionId };
   } catch (err) {
     log.warn(`loadSession(${sessionId}) failed: ${err.message}`);
-    return { ok: false, error: err.message };
+    return { ok: false, ...serializeAcpError(err) };
   }
 });
 
 ipcMain.handle('acp:prompt', async (evt, { sessionId, text }) => {
   const client = tileClients.get(evt.sender.id);
   if (!client) throw new Error('no ACP client for this window');
-  await client.prompt(sessionId, text);
-  return { ok: true };
+  try {
+    await client.prompt(sessionId, text);
+    return { ok: true };
+  } catch (err) {
+    log.error(`acp:prompt failed`, err);
+    const e = new Error(JSON.stringify(serializeAcpError(err)));
+    e.name = 'AcpError';
+    throw e;
+  }
 });
 
 ipcMain.handle('acp:cancel', async (evt, { sessionId } = {}) => {
