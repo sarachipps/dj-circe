@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { firstRunNeeded } = require('../onboarding/main');
+const { firstRunNeeded, listRealProfiles } = require('../onboarding/main');
 
 function mkTmp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'circe-ob-'));
@@ -55,4 +55,11 @@ test('firstRunNeeded: returns "adopt" when no state file but profiles exist', (t
   const hermesHome = mkTmp(t);
   mkProfile(hermesHome, 'picard');
   assert.strictEqual(firstRunNeeded(stateDir, hermesHome), 'adopt');
+});
+
+test('listRealProfiles: returns [] when profiles directory is missing', (t) => {
+  const hermesHome = mkTmp(t);
+  // profiles/ subdir intentionally not created
+  const result = listRealProfiles(hermesHome);
+  assert.deepStrictEqual(result, []);
 });

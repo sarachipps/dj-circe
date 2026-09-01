@@ -323,6 +323,9 @@ async function openAllTiles() {
 
 function adoptLegacyState() {
   const real = listRealProfiles(HERMES_HOME);
+  if (real.length === 0) {
+    throw new Error('No profiles found during adoption');
+  }
   const orchestrator = real[0];
   const s = loadStateFile();
   s.firstRunComplete = true;
