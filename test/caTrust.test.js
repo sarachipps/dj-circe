@@ -165,3 +165,31 @@ test('setupCaTrust: does not override user-set NODE_EXTRA_CA_CERTS', async (t) =
   });
   assert.strictEqual(process.env.NODE_EXTRA_CA_CERTS, '/user/preferred.pem');
 });
+
+test('setupCaTrust: does not override user-set SSL_CERT_FILE', async (t) => {
+  const originalSsl = process.env.SSL_CERT_FILE;
+  const originalNode = process.env.NODE_EXTRA_CA_CERTS;
+  process.env.SSL_CERT_FILE = '/user/preferred-bundle.pem';
+  delete process.env.NODE_EXTRA_CA_CERTS;
+  t.after(() => {
+    if (originalSsl === undefined) delete process.env.SSL_CERT_FILE;
+    else process.env.SSL_CERT_FILE = originalSsl;
+    if (originalNode === undefined) delete process.env.NODE_EXTRA_CA_CERTS;
+    else process.env.NODE_EXTRA_CA_CERTS = originalNode;
+  });
+  const ud = mkTmpUD(t);
+  const exec = fakeExec({
+    'security find-certificate -a -c Zscaler -p /Library/Keychains/System.keychain':
+      { stdout: FAKE_PEM, code: 0 },
+    'python3 -c import certifi; print(certifi.where())': { stdout: '/fake/certifi.pem\n', code: 0 },
+  });
+  const readFake = (p) => (p === '/fake/certifi.pem' ? FAKE_CERTIFI : fs.readFileSync(p, 'utf8'));
+  await caTrust.setupCaTrust({
+    userDataDir: ud,
+    hermesBin: '/fake/hermes',
+    log: { info: () => {}, warn: () => {}, error: () => {} },
+    exec,
+    readFile: readFake,
+  });
+  assert.strictEqual(process.env.SSL_CERT_FILE, '/user/preferred-bundle.pem');
+});
