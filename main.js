@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -7,6 +7,7 @@ const log = require('electron-log/main');
 const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
+const { saveAsAvatar } = require('./wikipediaClient');
 const { setupCaTrust } = require('./caTrust');
 const {
   refreshOrchestratorReferences,
@@ -498,6 +499,47 @@ ipcMain.handle('avatar:get', (evt) => {
   const name = tileProfiles.get(evt.sender.id);
   if (!name) return '';
   return loadAvatarDataUrl(name);
+});
+
+ipcMain.handle('avatar:pick', async (evt) => {
+  const name = tileProfiles.get(evt.sender.id);
+  if (!name) return { ok: false, error: 'no profile bound to window' };
+  const win = BrowserWindow.fromWebContents(evt.sender);
+  const result = await dialog.showOpenDialog(win, {
+    title: `Choose a new avatar for ${readDisplayName(name)}`,
+    properties: ['openFile'],
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths || !result.filePaths.length) {
+    return { ok: false, canceled: true };
+  }
+  const src = result.filePaths[0];
+  const profileDir =
+    name === 'default' ? HERMES_HOME : path.join(HERMES_HOME, 'profiles', name);
+  try {
+    const buf = fs.readFileSync(src);
+    await saveAsAvatar(buf, profileDir);
+    // The wizard writes avatar.png, but earlier or hand-installed profiles
+    // may have avatar.jpg/gif/webp on disk. loadAvatarDataUrl picks whichever
+    // extension it hits first — leave a stale one behind and the tile will
+    // render it instead of the new PNG.
+    for (const ext of ['jpg', 'jpeg', 'gif', 'webp']) {
+      try {
+        fs.unlinkSync(path.join(profileDir, `avatar.${ext}`));
+      } catch (err) {
+        if (err && err.code !== 'ENOENT') {
+          log.warn(`avatar cleanup (${ext}) failed for ${name}: ${err.message}`);
+        }
+      }
+    }
+    log.info(`avatar swapped for ${name} from ${src}`);
+    return { ok: true, dataUrl: loadAvatarDataUrl(name) };
+  } catch (err) {
+    log.error(`avatar swap failed for ${name}: ${err.message}`);
+    return { ok: false, error: err.message || String(err) };
+  }
 });
 
 ipcMain.handle('state:load', (evt) => {

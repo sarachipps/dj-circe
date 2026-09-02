@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('hermes', {
     model: argValue('--profile-model='),
   },
   getAvatar: () => ipcRenderer.invoke('avatar:get'),
+  pickAvatar: () => ipcRenderer.invoke('avatar:pick'),
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
   newSession: () => ipcRenderer.invoke('acp:newSession'),

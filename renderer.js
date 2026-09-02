@@ -96,21 +96,49 @@ document.title = `hermes · ${profile.display}`;
 document.body.dataset.profile = profile.name;
 
 const avatarEl = document.getElementById('avatar');
+avatarEl.setAttribute('role', 'button');
+avatarEl.setAttribute('tabindex', '0');
+avatarEl.setAttribute('title', 'Click to change avatar');
+avatarEl.style.cursor = 'pointer';
+
 function setInitialAvatar() {
   avatarEl.innerHTML = '';
   avatarEl.textContent = (profile.display || '?').charAt(0).toUpperCase();
   avatarEl.classList.add('avatar-fallback');
 }
-window.hermes.getAvatar().then((dataUrl) => {
+
+function renderAvatar(dataUrl) {
   if (!dataUrl) {
     setInitialAvatar();
     return;
   }
+  avatarEl.innerHTML = '';
+  avatarEl.classList.remove('avatar-fallback');
   const img = document.createElement('img');
   img.src = dataUrl;
   img.alt = '';
   img.addEventListener('error', setInitialAvatar);
   avatarEl.append(img);
+}
+
+window.hermes.getAvatar().then(renderAvatar);
+
+async function pickAvatar() {
+  try {
+    const r = await window.hermes.pickAvatar();
+    if (r && r.ok) renderAvatar(r.dataUrl);
+    else if (r && r.error) console.error('avatar pick failed:', r.error);
+  } catch (err) {
+    console.error('avatar pick threw:', err);
+  }
+}
+
+avatarEl.addEventListener('click', pickAvatar);
+avatarEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    pickAvatar();
+  }
 });
 
 const tabs = [];
