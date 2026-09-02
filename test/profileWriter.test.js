@@ -10,7 +10,12 @@ const {
   writeFirstTasks,
   writeBedrockConfig,
   writeDjToolingReference,
+  patchSoulWithDjToolingPointer,
+  soulHasDjToolingPointer,
+  refreshReferencesForAllProfiles,
   DJ_TOOLING_REFERENCE_PATH,
+  DJ_TOOLING_POINTER_START,
+  DJ_TOOLING_POINTER_END,
 } = require('../profileWriter');
 
 function withTmp(t) {
@@ -238,4 +243,134 @@ test('writeBedrockConfig: returns error when defaults file is unreadable', async
   // Neither file should have been created if we bailed early.
   assert.strictEqual(fs.existsSync(path.join(dir, 'config.yaml')), false);
   assert.strictEqual(fs.existsSync(path.join(dir, '.env')), false);
+});
+
+test('patchSoulWithDjToolingPointer: adds section when missing (no trailing comments)', () => {
+  const soul = '# Picard\n\nA starfleet captain.\n';
+  const r = patchSoulWithDjToolingPointer(soul);
+  assert.strictEqual(r.changed, true);
+  assert.ok(soulHasDjToolingPointer(r.content));
+  assert.ok(r.content.includes(DJ_TOOLING_POINTER_START));
+  assert.ok(r.content.includes(DJ_TOOLING_POINTER_END));
+  // Original prose preserved.
+  assert.match(r.content, /A starfleet captain\./);
+  // The load-bearing correction lands in SOUL.
+  assert.match(r.content, /org-policy blockers/);
+  assert.match(r.content, /do not apply/);
+});
+
+test('patchSoulWithDjToolingPointer: inserts BEFORE trailing HTML-comment metadata', () => {
+  const soul =
+    '# Picard\n\nBody text.\n\n' +
+    '<!-- circe:orchestrator v1 -->\n' +
+    '<!-- avatar-source: https://example.com/picard.png -->\n';
+  const r = patchSoulWithDjToolingPointer(soul);
+  assert.strictEqual(r.changed, true);
+  // Trailing comments stay at the very bottom.
+  const pointerIdx = r.content.indexOf(DJ_TOOLING_POINTER_START);
+  const orchIdx = r.content.indexOf('<!-- circe:orchestrator v1 -->');
+  const avatarIdx = r.content.indexOf('<!-- avatar-source:');
+  assert.ok(pointerIdx > 0, 'pointer section should exist');
+  assert.ok(pointerIdx < orchIdx, 'pointer must appear before trailing metadata');
+  assert.ok(pointerIdx < avatarIdx, 'pointer must appear before trailing metadata');
+  // Body content is untouched.
+  assert.match(r.content, /Body text\./);
+});
+
+test('patchSoulWithDjToolingPointer: idempotent when marker already present', () => {
+  const soul = '# Picard\n\nBody.\n';
+  const once = patchSoulWithDjToolingPointer(soul);
+  assert.strictEqual(once.changed, true);
+  const twice = patchSoulWithDjToolingPointer(once.content);
+  assert.strictEqual(twice.changed, false);
+  assert.strictEqual(twice.content, once.content);
+});
+
+test('soulHasDjToolingPointer: detects marker', () => {
+  assert.strictEqual(soulHasDjToolingPointer('# Picard\n'), false);
+  assert.strictEqual(soulHasDjToolingPointer(null), false);
+  assert.strictEqual(soulHasDjToolingPointer(undefined), false);
+  const withMarker = `# x\n\n${DJ_TOOLING_POINTER_START}\nbody\n${DJ_TOOLING_POINTER_END}\n`;
+  assert.strictEqual(soulHasDjToolingPointer(withMarker), true);
+});
+
+test('refreshReferencesForAllProfiles: rewrites reference and patches SOUL for each profile', async (t) => {
+  const tmp = withTmp(t);
+  // Two profiles, each with a SOUL missing the pointer.
+  for (const name of ['picard', 'data']) {
+    const dir = path.join(tmp, 'profiles', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SOUL.md'), `# ${name}\n\nBody.\n`);
+  }
+  const results = await refreshReferencesForAllProfiles({
+    hermesHome: tmp,
+    profileNames: ['picard', 'data'],
+  });
+  assert.strictEqual(results.length, 2);
+  for (const r of results) {
+    assert.strictEqual(r.referenceWritten, true);
+    assert.strictEqual(r.soulPatched, true);
+    assert.strictEqual(r.referenceError, undefined);
+    assert.strictEqual(r.soulError, undefined);
+  }
+  // Both profiles now have dj-tooling.md and the SOUL pointer.
+  for (const name of ['picard', 'data']) {
+    const dir = path.join(tmp, 'profiles', name);
+    assert.ok(fs.existsSync(path.join(dir, 'dj-tooling.md')));
+    const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+    assert.ok(soulHasDjToolingPointer(soul), `expected SOUL for ${name} to have pointer`);
+  }
+});
+
+test('refreshReferencesForAllProfiles: SOUL already patched → reference rewritten, SOUL untouched', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  // Pre-patched SOUL.
+  const patched = patchSoulWithDjToolingPointer('# picard\n\nBody.\n').content;
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), patched);
+  const before = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  const results = await refreshReferencesForAllProfiles({
+    hermesHome: tmp,
+    profileNames: ['picard'],
+  });
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].referenceWritten, true);
+  assert.strictEqual(results[0].soulPatched, false);
+  const after = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.strictEqual(after, before, 'SOUL should be byte-identical when already patched');
+});
+
+test('refreshReferencesForAllProfiles: tolerates missing SOUL.md', async (t) => {
+  const tmp = withTmp(t);
+  // Profile dir exists but no SOUL.md.
+  const dir = path.join(tmp, 'profiles', 'ghost');
+  fs.mkdirSync(dir, { recursive: true });
+  const results = await refreshReferencesForAllProfiles({
+    hermesHome: tmp,
+    profileNames: ['ghost'],
+  });
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].referenceWritten, true);
+  assert.strictEqual(results[0].soulPatched, false);
+  assert.strictEqual(results[0].soulError, undefined);
+  // dj-tooling.md still lands.
+  assert.ok(fs.existsSync(path.join(dir, 'dj-tooling.md')));
+});
+
+test('refreshReferencesForAllProfiles: reports per-profile errors independently', async (t) => {
+  const tmp = withTmp(t);
+  // Profile that exists.
+  fs.mkdirSync(path.join(tmp, 'profiles', 'picard'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'profiles', 'picard', 'SOUL.md'), '# picard\n\nBody.\n');
+  const results = await refreshReferencesForAllProfiles({
+    hermesHome: tmp,
+    profileNames: ['picard'],
+    sourcePath: path.join(tmp, 'nope.md'),
+  });
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].referenceWritten, false);
+  assert.match(results[0].referenceError, /ENOENT|no such file/i);
+  // SOUL patching still ran even though reference write failed.
+  assert.strictEqual(results[0].soulPatched, true);
 });

@@ -8,7 +8,13 @@ const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
 const { setupCaTrust } = require('./caTrust');
-const { writeDjToolingReference } = require('./profileWriter');
+const { refreshReferencesForAllProfiles } = require('./profileWriter');
+
+// Bumped when the shipped dj-tooling.md OR the SOUL pointer section changes
+// meaningfully enough that already-onboarded profiles should pick it up.
+// state.json.referencesVersion tracks per-installation progress; the
+// backfill only runs when this constant is higher.
+const REFERENCES_VERSION = 1;
 
 app.setName('Circe');
 log.initialize();
@@ -338,18 +344,47 @@ function adoptLegacyState() {
     `Adopted ${real.length} existing profile(s); wizard skipped. ` +
     `orchestratorProfile=${orchestrator}`,
   );
-  // Drop the DJ-tooling reference into every adopted profile so orchestrators
-  // and specialists alike have the same on-disk pointer the wizard would have
-  // written. Idempotent overwrite — the shipped file is source of truth.
-  for (const name of real) {
-    const profileDir = path.join(HERMES_HOME, 'profiles', name);
-    writeDjToolingReference({ profileDir })
-      .then((r) => {
-        if (!r.ok) {
-          log.warn(`dj-tooling.md write failed for ${name}: ${r.error}`);
-        }
-      })
-      .catch((err) => log.warn(`dj-tooling.md write threw for ${name}: ${err.message}`));
+}
+
+// One-time-per-version backfill of `dj-tooling.md` and the SOUL pointer
+// section for every existing profile. Runs at each startup but no-ops once
+// `state.json.referencesVersion` has caught up. Bump REFERENCES_VERSION
+// (top of file) whenever the shipped reference or SOUL pointer changes in a
+// way already-onboarded profiles should pick up.
+async function backfillReferencesIfNeeded() {
+  const current = Number(stateCache.referencesVersion || 0);
+  if (current >= REFERENCES_VERSION) return;
+  const real = listRealProfiles(HERMES_HOME);
+  if (real.length === 0) {
+    stateCache.referencesVersion = REFERENCES_VERSION;
+    writeStateFile(stateCache);
+    return;
+  }
+  log.info(
+    `References backfill: v${current} → v${REFERENCES_VERSION}; ` +
+    `profiles=${real.join(', ')}`,
+  );
+  try {
+    const results = await refreshReferencesForAllProfiles({
+      hermesHome: HERMES_HOME,
+      profileNames: real,
+    });
+    for (const r of results) {
+      if (r.referenceError) {
+        log.warn(`  ${r.profile}: dj-tooling.md write failed: ${r.referenceError}`);
+      }
+      if (r.soulError) {
+        log.warn(`  ${r.profile}: SOUL patch failed: ${r.soulError}`);
+      }
+      log.info(
+        `  ${r.profile}: dj-tooling.md=${r.referenceWritten ? 'ok' : 'skip'}, ` +
+        `SOUL patched=${r.soulPatched ? 'yes' : 'no'}`,
+      );
+    }
+    stateCache.referencesVersion = REFERENCES_VERSION;
+    writeStateFile(stateCache);
+  } catch (err) {
+    log.error('References backfill threw:', err.message || String(err));
   }
 }
 
@@ -373,6 +408,9 @@ app.whenReady().then(async () => {
         logFilePath: log.transports.file.getFile().path,
         onBeforeClose: async () => {
           Object.assign(stateCache, loadStateFile());
+          // Wizard just wrote a fresh profile with the current reference
+          // and SOUL pointer, so stamp the version to skip future backfills.
+          await backfillReferencesIfNeeded();
           await openAllTiles();
         },
       });
@@ -399,6 +437,10 @@ app.whenReady().then(async () => {
       return;
     }
   }
+
+  // Version-gated backfill: brings pre-existing profiles up to the current
+  // shipped dj-tooling.md and SOUL pointer. Idempotent no-op once caught up.
+  await backfillReferencesIfNeeded();
 
   try {
     await openAllTiles();
