@@ -1,0 +1,86 @@
+# Performance and reliability defaults for a fresh Circe orchestrator.
+# Merged with a code-generated `platform_toolsets` + `model` + `providers`
+# block at profile-create time (see profileWriter.js:writeBedrockConfig).
+#
+# These are the settings that make sessions faster and more predictable at
+# DJ. Not personal-taste preferences (personalities, UI skin, disabled-skill
+# lists, TTS/STT choices) — those stay with each user's hand-tuned profile.
+#
+# Any value here can be overridden per-profile by editing the profile's
+# config.yaml after onboarding.
+
+agent:
+  max_turns: 150
+  reasoning_effort: medium
+  verbose: false
+
+# Long sessions get expensive when the whole transcript re-enters context
+# every turn. Compression collapses old turns once the buffer crosses
+# threshold, keeping the working context small.
+compression:
+  enabled: true
+  threshold: 0.5
+  target_ratio: 0.2
+  protect_last_n: 20
+  protect_first_n: 3
+
+# Bedrock/Anthropic prompt caching — direct latency and cost win when the
+# same system prompt is reused across turns.
+prompt_caching:
+  cache_ttl: 5m
+
+# Cap runaway tool loops before they burn a token budget.
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+
+# Memory tuning: keep the memory footprint modest so it doesn't dominate
+# context on every turn.
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  nudge_interval: 10
+  flush_min_turns: 6
+
+# Delegation from the orchestrator to specialist profiles.
+delegation:
+  max_iterations: 50
+
+# Sensible timeouts for the terminal, code-execution, and browser tools.
+terminal:
+  backend: local
+  cwd: .
+  timeout: 180
+  home_mode: auto
+
+browser:
+  inactivity_timeout: 120
+
+code_execution:
+  timeout: 300
+  max_tool_calls: 50
+
+# Bedrock region — Mantle is in us-east-1 but the SigV4 fallback path
+# uses us-east-2. Harmless to set even on the dj-bedrock proxy path.
+bedrock:
+  region: us-east-2
+
+# Group sessions by user so history/memory scope correctly across profiles.
+group_sessions_per_user: true
+
+# Do not auto-reset sessions on a timer — Sara found this disruptive to
+# multi-day workflows. Users can opt in per-profile if they want it.
+session_reset:
+  mode: none
+  idle_minutes: 1440
+  at_hour: 4

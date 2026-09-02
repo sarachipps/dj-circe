@@ -127,17 +127,26 @@ async function writeDjToolingReference({ profileDir, sourcePath }) {
   }
 }
 
-async function writeBedrockConfig({ profileDir, apiKey }) {
-  // Register the same platform toolsets Circe's hand-tuned profiles use.
-  // Without these, Claude has no local scaffolding (no memory/todo/skills/
-  // terminal), which shows up as very slow turns because everything has to
-  // be reasoned from scratch.
-  const yaml =
+const CONFIG_DEFAULTS_PATH = path.join(
+  __dirname,
+  'onboarding',
+  'config-defaults.yaml',
+);
+
+// The provider/toolset block is code-generated (rather than living in
+// config-defaults.yaml) because it names DJ-specific values — the
+// Bedrock-Mantle base URL, the dj-bedrock provider, the toolset for a
+// fresh orchestrator. If we later grow to support more provider paths
+// (direct Bedrock SigV4, personal Anthropic keys), this is the block
+// that varies. `config-defaults.yaml` stays reusable across all of them.
+function providerBlockYaml() {
+  return (
     'platform_toolsets:\n' +
     '  cli:\n' +
     '    - clarify\n' +
     '    - code_execution\n' +
     '    - cronjob\n' +
+    '    - delegation\n' +
     '    - file\n' +
     '    - kanban\n' +
     '    - memory\n' +
@@ -145,6 +154,7 @@ async function writeBedrockConfig({ profileDir, apiKey }) {
     '    - skills\n' +
     '    - terminal\n' +
     '    - todo\n' +
+    '    - vision\n' +
     '    - web\n' +
     'model:\n' +
     '  default: anthropic.claude-sonnet-5\n' +
@@ -153,7 +163,25 @@ async function writeBedrockConfig({ profileDir, apiKey }) {
     '  dj-bedrock:\n' +
     '    base_url: https://bedrock-mantle.us-east-1.api.aws/anthropic\n' +
     '    key_env: ANTHROPIC_API_KEY\n' +
-    '    api_mode: anthropic_messages\n';
+    '    api_mode: anthropic_messages\n'
+  );
+}
+
+async function writeBedrockConfig({ profileDir, apiKey, defaultsPath }) {
+  // Compose config.yaml from two sources:
+  //   1. Provider block (code-generated) — DJ-specific model/toolset/provider.
+  //   2. Perf/reliability defaults (file) — reasoning_effort, compression,
+  //      prompt_caching, tool_loop_guardrails, memory/delegation tuning.
+  // Distilled from Sara's hand-tuned Picard profile so every new
+  // orchestrator starts snappy without needing to hand-tune first.
+  const defaultsSrc = defaultsPath || CONFIG_DEFAULTS_PATH;
+  let defaults;
+  try {
+    defaults = fs.readFileSync(defaultsSrc, 'utf8');
+  } catch (err) {
+    return { ok: false, error: `could not read config defaults: ${err.message || err}` };
+  }
+  const yaml = providerBlockYaml() + defaults;
   try {
     fs.mkdirSync(profileDir, { recursive: true });
     fs.writeFileSync(path.join(profileDir, 'config.yaml'), yaml);
@@ -171,4 +199,5 @@ module.exports = {
   writeBedrockConfig,
   writeDjToolingReference,
   DJ_TOOLING_REFERENCE_PATH,
+  CONFIG_DEFAULTS_PATH,
 };

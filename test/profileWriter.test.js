@@ -201,12 +201,41 @@ test('writeBedrockConfig: writes config.yaml and .env with correct values', asyn
   const r = await writeBedrockConfig({ profileDir: dir, apiKey: 'sk-test-abc' });
   assert.strictEqual(r.ok, true);
   const yaml = fs.readFileSync(path.join(dir, 'config.yaml'), 'utf8');
+  // Provider block.
   assert.match(yaml, /provider: dj-bedrock/);
   assert.match(yaml, /base_url: https:\/\/bedrock-mantle\.us-east-1\.api\.aws\/anthropic/);
   assert.match(yaml, /default: anthropic\.claude-sonnet-5/);
   assert.match(yaml, /key_env: ANTHROPIC_API_KEY/);
   assert.match(yaml, /api_mode: anthropic_messages/);
+  // Toolset: delegation and vision are on by default alongside the base 11.
+  assert.match(yaml, /^\s+- delegation$/m);
+  assert.match(yaml, /^\s+- vision$/m);
+  // Perf defaults from config-defaults.yaml.
+  assert.match(yaml, /reasoning_effort: medium/);
+  assert.match(yaml, /max_turns: 150/);
+  assert.match(yaml, /prompt_caching:/);
+  assert.match(yaml, /cache_ttl: 5m/);
+  assert.match(yaml, /compression:/);
+  assert.match(yaml, /tool_loop_guardrails:/);
+  assert.match(yaml, /delegation:\n\s+max_iterations: 50/);
+  assert.match(yaml, /group_sessions_per_user: true/);
   const env = fs.readFileSync(path.join(dir, '.env'), 'utf8');
   assert.strictEqual(env.trim(), 'ANTHROPIC_API_KEY=sk-test-abc');
   assert.doesNotMatch(env, /AWS_/);
+});
+
+test('writeBedrockConfig: returns error when defaults file is unreadable', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  const r = await writeBedrockConfig({
+    profileDir: dir,
+    apiKey: 'sk',
+    defaultsPath: path.join(tmp, 'nope.yaml'),
+  });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /could not read config defaults/i);
+  // Neither file should have been created if we bailed early.
+  assert.strictEqual(fs.existsSync(path.join(dir, 'config.yaml')), false);
+  assert.strictEqual(fs.existsSync(path.join(dir, '.env')), false);
 });
