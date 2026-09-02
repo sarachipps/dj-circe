@@ -8,13 +8,20 @@ const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
 const { setupCaTrust } = require('./caTrust');
-const { refreshReferencesForAllProfiles } = require('./profileWriter');
+const {
+  refreshOrchestratorReferences,
+  pruneStaleReferences,
+} = require('./profileWriter');
 
 // Bumped when the shipped dj-tooling.md OR the SOUL pointer section changes
 // meaningfully enough that already-onboarded profiles should pick it up.
 // state.json.referencesVersion tracks per-installation progress; the
 // backfill only runs when this constant is higher.
-const REFERENCES_VERSION = 1;
+//
+// v2: scoped the DJ tooling to the orchestrator profile only, and stripped
+// it from every non-orchestrator profile (specialists have their own SOULs
+// and never need to run the setup flows).
+const REFERENCES_VERSION = 2;
 
 app.setName('Circe');
 log.initialize();
@@ -346,11 +353,12 @@ function adoptLegacyState() {
   );
 }
 
-// One-time-per-version backfill of `dj-tooling.md` and the SOUL pointer
-// section for every existing profile. Runs at each startup but no-ops once
-// `state.json.referencesVersion` has caught up. Bump REFERENCES_VERSION
-// (top of file) whenever the shipped reference or SOUL pointer changes in a
-// way already-onboarded profiles should pick up.
+// One-time-per-version backfill of the DJ tooling reference and SOUL
+// pointer on the ORCHESTRATOR profile, plus cleanup of any stray copies
+// on non-orchestrator profiles (fallout from v1's over-broad scope).
+// Runs at each startup but no-ops once state.json.referencesVersion has
+// caught up. Bump REFERENCES_VERSION (top of file) whenever the shipped
+// reference or SOUL pointer changes.
 async function backfillReferencesIfNeeded() {
   const current = Number(stateCache.referencesVersion || 0);
   if (current >= REFERENCES_VERSION) return;
@@ -360,16 +368,18 @@ async function backfillReferencesIfNeeded() {
     writeStateFile(stateCache);
     return;
   }
+  const orchestrator = stateCache.orchestratorProfile;
+  const others = real.filter((n) => n !== orchestrator);
   log.info(
     `References backfill: v${current} → v${REFERENCES_VERSION}; ` +
-    `profiles=${real.join(', ')}`,
+    `orchestrator=${orchestrator || '(unset)'}, others=${others.join(', ') || 'none'}`,
   );
   try {
-    const results = await refreshReferencesForAllProfiles({
-      hermesHome: HERMES_HOME,
-      profileNames: real,
-    });
-    for (const r of results) {
+    if (orchestrator && real.includes(orchestrator)) {
+      const r = await refreshOrchestratorReferences({
+        hermesHome: HERMES_HOME,
+        orchestratorProfile: orchestrator,
+      });
       if (r.referenceError) {
         log.warn(`  ${r.profile}: dj-tooling.md write failed: ${r.referenceError}`);
       }
@@ -377,9 +387,36 @@ async function backfillReferencesIfNeeded() {
         log.warn(`  ${r.profile}: SOUL patch failed: ${r.soulError}`);
       }
       log.info(
-        `  ${r.profile}: dj-tooling.md=${r.referenceWritten ? 'ok' : 'skip'}, ` +
+        `  orchestrator ${r.profile}: dj-tooling.md=${r.referenceWritten ? 'ok' : 'skip'}, ` +
         `SOUL patched=${r.soulPatched ? 'yes' : 'no'}`,
       );
+    } else if (orchestrator) {
+      log.warn(
+        `state.orchestratorProfile=${orchestrator} but that profile is not ` +
+        `on disk; skipping orchestrator reference refresh`,
+      );
+    } else {
+      log.warn('No orchestratorProfile in state; skipping orchestrator refresh');
+    }
+    if (others.length) {
+      const prunes = await pruneStaleReferences({
+        hermesHome: HERMES_HOME,
+        profileNames: others,
+      });
+      for (const p of prunes) {
+        if (p.referenceError) {
+          log.warn(`  ${p.profile}: dj-tooling.md remove failed: ${p.referenceError}`);
+        }
+        if (p.soulError) {
+          log.warn(`  ${p.profile}: SOUL strip failed: ${p.soulError}`);
+        }
+        if (p.referenceRemoved || p.soulStripped) {
+          log.info(
+            `  pruned ${p.profile}: dj-tooling.md=${p.referenceRemoved ? 'removed' : 'skip'}, ` +
+            `SOUL stripped=${p.soulStripped ? 'yes' : 'no'}`,
+          );
+        }
+      }
     }
     stateCache.referencesVersion = REFERENCES_VERSION;
     writeStateFile(stateCache);

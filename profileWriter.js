@@ -258,35 +258,88 @@ async function writeBedrockConfig({ profileDir, apiKey, defaultsPath }) {
   }
 }
 
-// Refresh the DJ-tooling reference and SOUL pointer in every named profile
-// directory under hermesHome/profiles/. Idempotent by design: rewrites
-// dj-tooling.md unconditionally (source of truth is in-repo), and inserts
-// the SOUL pointer section only if a matching marker isn't already present.
-// Returns a per-profile summary for logging.
-async function refreshReferencesForAllProfiles({ hermesHome, profileNames, sourcePath }) {
+// Remove the pointer section (if present) from a SOUL. Complement of
+// patchSoulWithDjToolingPointer — used when pruning dj-tooling from a
+// non-orchestrator profile that got the pointer via a prior over-broad
+// backfill. Idempotent by marker.
+function stripDjToolingPointer(soulMd) {
+  if (!soulHasDjToolingPointer(soulMd)) {
+    return { changed: false, content: soulMd };
+  }
+  const startIdx = soulMd.indexOf(DJ_TOOLING_POINTER_START);
+  const endMarker = DJ_TOOLING_POINTER_END;
+  const endIdx = soulMd.indexOf(endMarker, startIdx);
+  if (endIdx === -1) {
+    // Marker unbalanced; leave content alone rather than mangle it.
+    return { changed: false, content: soulMd };
+  }
+  // Cut the block plus its trailing newlines so we don't leave a stray gap.
+  const before = soulMd.slice(0, startIdx).replace(/\n{2,}$/, '\n\n');
+  const after = soulMd.slice(endIdx + endMarker.length).replace(/^\n+/, '');
+  const content = `${before.replace(/\s+$/, '')}\n${after ? `\n${after}` : '\n'}`;
+  return { changed: true, content };
+}
+
+// Refresh the DJ-tooling reference and SOUL pointer on the ORCHESTRATOR
+// profile only. Specialist profiles never need this — the orchestrator is
+// the one that wires MCP servers and provider config; specialists get
+// spun up by the orchestrator with their own SOUL and don't run these
+// setup flows. Returns a summary for logging.
+async function refreshOrchestratorReferences({ hermesHome, orchestratorProfile, sourcePath }) {
+  const summary = {
+    profile: orchestratorProfile,
+    referenceWritten: false,
+    soulPatched: false,
+  };
+  const profileDir = path.join(hermesHome, 'profiles', orchestratorProfile);
+  const refRes = await writeDjToolingReference({ profileDir, sourcePath });
+  if (refRes.ok) summary.referenceWritten = true;
+  else summary.referenceError = refRes.error;
+  const soulPath = path.join(profileDir, 'SOUL.md');
+  try {
+    const soul = fs.readFileSync(soulPath, 'utf8');
+    const patch = patchSoulWithDjToolingPointer(soul);
+    if (patch.changed) {
+      fs.writeFileSync(soulPath, patch.content);
+      summary.soulPatched = true;
+    }
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      summary.soulError = err.message || String(err);
+    }
+  }
+  return summary;
+}
+
+// Remove dj-tooling.md and any DJ-tooling SOUL pointer from profiles that
+// aren't the orchestrator. Cleans up the fallout from the v1 backfill,
+// which wrote both artifacts to every profile before we tightened scope.
+// Idempotent: profiles that were never touched by v1 skip cleanly.
+async function pruneStaleReferences({ hermesHome, profileNames }) {
   const results = [];
   for (const name of profileNames) {
     const profileDir = path.join(hermesHome, 'profiles', name);
-    const summary = { profile: name, referenceWritten: false, soulPatched: false };
-    // 1. Refresh dj-tooling.md.
-    const refRes = await writeDjToolingReference({ profileDir, sourcePath });
-    if (refRes.ok) {
-      summary.referenceWritten = true;
-    } else {
-      summary.referenceError = refRes.error;
+    const summary = { profile: name, referenceRemoved: false, soulStripped: false };
+    // 1. Remove dj-tooling.md if it's there.
+    const refPath = path.join(profileDir, 'dj-tooling.md');
+    try {
+      fs.unlinkSync(refPath);
+      summary.referenceRemoved = true;
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        summary.referenceError = err.message || String(err);
+      }
     }
-    // 2. Patch SOUL.md if the pointer section isn't there yet.
+    // 2. Strip the SOUL pointer section if it's there.
     const soulPath = path.join(profileDir, 'SOUL.md');
     try {
       const soul = fs.readFileSync(soulPath, 'utf8');
-      const patch = patchSoulWithDjToolingPointer(soul);
-      if (patch.changed) {
-        fs.writeFileSync(soulPath, patch.content);
-        summary.soulPatched = true;
+      const strip = stripDjToolingPointer(soul);
+      if (strip.changed) {
+        fs.writeFileSync(soulPath, strip.content);
+        summary.soulStripped = true;
       }
     } catch (err) {
-      // No SOUL.md is fine — the profile might be a scratch or partial one.
-      // We only record real errors that aren't ENOENT.
       if (err && err.code !== 'ENOENT') {
         summary.soulError = err.message || String(err);
       }
@@ -303,8 +356,10 @@ module.exports = {
   writeBedrockConfig,
   writeDjToolingReference,
   patchSoulWithDjToolingPointer,
+  stripDjToolingPointer,
   soulHasDjToolingPointer,
-  refreshReferencesForAllProfiles,
+  refreshOrchestratorReferences,
+  pruneStaleReferences,
   DJ_TOOLING_REFERENCE_PATH,
   DJ_TOOLING_POINTER_START,
   DJ_TOOLING_POINTER_END,

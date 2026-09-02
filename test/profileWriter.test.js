@@ -11,8 +11,10 @@ const {
   writeBedrockConfig,
   writeDjToolingReference,
   patchSoulWithDjToolingPointer,
+  stripDjToolingPointer,
   soulHasDjToolingPointer,
-  refreshReferencesForAllProfiles,
+  refreshOrchestratorReferences,
+  pruneStaleReferences,
   DJ_TOOLING_REFERENCE_PATH,
   DJ_TOOLING_POINTER_START,
   DJ_TOOLING_POINTER_END,
@@ -294,83 +296,151 @@ test('soulHasDjToolingPointer: detects marker', () => {
   assert.strictEqual(soulHasDjToolingPointer(withMarker), true);
 });
 
-test('refreshReferencesForAllProfiles: rewrites reference and patches SOUL for each profile', async (t) => {
-  const tmp = withTmp(t);
-  // Two profiles, each with a SOUL missing the pointer.
-  for (const name of ['picard', 'data']) {
-    const dir = path.join(tmp, 'profiles', name);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'SOUL.md'), `# ${name}\n\nBody.\n`);
-  }
-  const results = await refreshReferencesForAllProfiles({
-    hermesHome: tmp,
-    profileNames: ['picard', 'data'],
-  });
-  assert.strictEqual(results.length, 2);
-  for (const r of results) {
-    assert.strictEqual(r.referenceWritten, true);
-    assert.strictEqual(r.soulPatched, true);
-    assert.strictEqual(r.referenceError, undefined);
-    assert.strictEqual(r.soulError, undefined);
-  }
-  // Both profiles now have dj-tooling.md and the SOUL pointer.
-  for (const name of ['picard', 'data']) {
-    const dir = path.join(tmp, 'profiles', name);
-    assert.ok(fs.existsSync(path.join(dir, 'dj-tooling.md')));
-    const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
-    assert.ok(soulHasDjToolingPointer(soul), `expected SOUL for ${name} to have pointer`);
-  }
-});
-
-test('refreshReferencesForAllProfiles: SOUL already patched → reference rewritten, SOUL untouched', async (t) => {
+test('refreshOrchestratorReferences: writes reference and patches SOUL on named profile', async (t) => {
   const tmp = withTmp(t);
   const dir = path.join(tmp, 'profiles', 'picard');
   fs.mkdirSync(dir, { recursive: true });
-  // Pre-patched SOUL.
-  const patched = patchSoulWithDjToolingPointer('# picard\n\nBody.\n').content;
-  fs.writeFileSync(path.join(dir, 'SOUL.md'), patched);
-  const before = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
-  const results = await refreshReferencesForAllProfiles({
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# picard\n\nBody.\n');
+  const r = await refreshOrchestratorReferences({
     hermesHome: tmp,
-    profileNames: ['picard'],
+    orchestratorProfile: 'picard',
   });
-  assert.strictEqual(results.length, 1);
-  assert.strictEqual(results[0].referenceWritten, true);
-  assert.strictEqual(results[0].soulPatched, false);
-  const after = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
-  assert.strictEqual(after, before, 'SOUL should be byte-identical when already patched');
+  assert.strictEqual(r.profile, 'picard');
+  assert.strictEqual(r.referenceWritten, true);
+  assert.strictEqual(r.soulPatched, true);
+  assert.strictEqual(r.referenceError, undefined);
+  assert.strictEqual(r.soulError, undefined);
+  assert.ok(fs.existsSync(path.join(dir, 'dj-tooling.md')));
+  const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.ok(soulHasDjToolingPointer(soul));
 });
 
-test('refreshReferencesForAllProfiles: tolerates missing SOUL.md', async (t) => {
+test('refreshOrchestratorReferences: idempotent — second run leaves SOUL byte-identical', async (t) => {
   const tmp = withTmp(t);
-  // Profile dir exists but no SOUL.md.
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# picard\n\nBody.\n');
+  await refreshOrchestratorReferences({ hermesHome: tmp, orchestratorProfile: 'picard' });
+  const before = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  const r = await refreshOrchestratorReferences({ hermesHome: tmp, orchestratorProfile: 'picard' });
+  assert.strictEqual(r.soulPatched, false);
+  const after = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.strictEqual(after, before);
+});
+
+test('refreshOrchestratorReferences: tolerates missing SOUL.md', async (t) => {
+  const tmp = withTmp(t);
   const dir = path.join(tmp, 'profiles', 'ghost');
   fs.mkdirSync(dir, { recursive: true });
-  const results = await refreshReferencesForAllProfiles({
-    hermesHome: tmp,
-    profileNames: ['ghost'],
-  });
-  assert.strictEqual(results.length, 1);
-  assert.strictEqual(results[0].referenceWritten, true);
-  assert.strictEqual(results[0].soulPatched, false);
-  assert.strictEqual(results[0].soulError, undefined);
-  // dj-tooling.md still lands.
+  const r = await refreshOrchestratorReferences({ hermesHome: tmp, orchestratorProfile: 'ghost' });
+  assert.strictEqual(r.referenceWritten, true);
+  assert.strictEqual(r.soulPatched, false);
+  assert.strictEqual(r.soulError, undefined);
   assert.ok(fs.existsSync(path.join(dir, 'dj-tooling.md')));
 });
 
-test('refreshReferencesForAllProfiles: reports per-profile errors independently', async (t) => {
+test('refreshOrchestratorReferences: reports source-read errors', async (t) => {
   const tmp = withTmp(t);
-  // Profile that exists.
-  fs.mkdirSync(path.join(tmp, 'profiles', 'picard'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, 'profiles', 'picard', 'SOUL.md'), '# picard\n\nBody.\n');
-  const results = await refreshReferencesForAllProfiles({
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# picard\n\nBody.\n');
+  const r = await refreshOrchestratorReferences({
     hermesHome: tmp,
-    profileNames: ['picard'],
+    orchestratorProfile: 'picard',
     sourcePath: path.join(tmp, 'nope.md'),
   });
-  assert.strictEqual(results.length, 1);
-  assert.strictEqual(results[0].referenceWritten, false);
-  assert.match(results[0].referenceError, /ENOENT|no such file/i);
-  // SOUL patching still ran even though reference write failed.
-  assert.strictEqual(results[0].soulPatched, true);
+  assert.strictEqual(r.referenceWritten, false);
+  assert.match(r.referenceError, /ENOENT|no such file/i);
+  // SOUL patching still ran.
+  assert.strictEqual(r.soulPatched, true);
+});
+
+test('stripDjToolingPointer: no-op when marker absent', () => {
+  const soul = '# picard\n\nBody.\n';
+  const r = stripDjToolingPointer(soul);
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.content, soul);
+});
+
+test('stripDjToolingPointer: removes the pointer section, preserves surrounding content', () => {
+  const original =
+    '# picard\n\nBody text.\n\n' +
+    '<!-- circe:orchestrator v1 -->\n' +
+    '<!-- avatar-source: https://example.com/picard.png -->\n';
+  const patched = patchSoulWithDjToolingPointer(original).content;
+  assert.ok(soulHasDjToolingPointer(patched));
+  const stripped = stripDjToolingPointer(patched);
+  assert.strictEqual(stripped.changed, true);
+  assert.strictEqual(soulHasDjToolingPointer(stripped.content), false);
+  // Original body and trailing metadata survive.
+  assert.match(stripped.content, /Body text\./);
+  assert.match(stripped.content, /<!-- circe:orchestrator v1 -->/);
+  assert.match(stripped.content, /<!-- avatar-source:/);
+});
+
+test('stripDjToolingPointer: round-trips with patch (patch → strip returns to original)', () => {
+  const original = '# picard\n\nBody.\n';
+  const patched = patchSoulWithDjToolingPointer(original).content;
+  const stripped = stripDjToolingPointer(patched).content;
+  // Trailing whitespace normalizes to one newline; compare trimmed.
+  assert.strictEqual(stripped.trimEnd() + '\n', original.trimEnd() + '\n');
+});
+
+test('pruneStaleReferences: removes dj-tooling.md and strips SOUL pointer on non-orchestrator profiles', async (t) => {
+  const tmp = withTmp(t);
+  for (const name of ['data', 'worf']) {
+    const dir = path.join(tmp, 'profiles', name);
+    fs.mkdirSync(dir, { recursive: true });
+    // Simulate v1 backfill state: both artifacts present.
+    fs.writeFileSync(path.join(dir, 'dj-tooling.md'), '# stale ref\n');
+    const soul = patchSoulWithDjToolingPointer(`# ${name}\n\nBody.\n`).content;
+    fs.writeFileSync(path.join(dir, 'SOUL.md'), soul);
+  }
+  const results = await pruneStaleReferences({
+    hermesHome: tmp,
+    profileNames: ['data', 'worf'],
+  });
+  assert.strictEqual(results.length, 2);
+  for (const r of results) {
+    assert.strictEqual(r.referenceRemoved, true);
+    assert.strictEqual(r.soulStripped, true);
+    assert.strictEqual(r.referenceError, undefined);
+    assert.strictEqual(r.soulError, undefined);
+  }
+  for (const name of ['data', 'worf']) {
+    const dir = path.join(tmp, 'profiles', name);
+    assert.strictEqual(fs.existsSync(path.join(dir, 'dj-tooling.md')), false);
+    const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+    assert.strictEqual(soulHasDjToolingPointer(soul), false);
+    assert.match(soul, /Body\./);
+  }
+});
+
+test('pruneStaleReferences: idempotent when there is nothing to remove', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'clean');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# clean\n\nBody.\n');
+  const r = (await pruneStaleReferences({
+    hermesHome: tmp,
+    profileNames: ['clean'],
+  }))[0];
+  assert.strictEqual(r.referenceRemoved, false);
+  assert.strictEqual(r.soulStripped, false);
+  assert.strictEqual(r.referenceError, undefined);
+  assert.strictEqual(r.soulError, undefined);
+});
+
+test('pruneStaleReferences: tolerates missing SOUL.md', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'ghost');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'dj-tooling.md'), '# stale\n');
+  const r = (await pruneStaleReferences({
+    hermesHome: tmp,
+    profileNames: ['ghost'],
+  }))[0];
+  assert.strictEqual(r.referenceRemoved, true);
+  assert.strictEqual(r.soulStripped, false);
+  assert.strictEqual(r.soulError, undefined);
 });
