@@ -9,6 +9,8 @@ const {
   createOrchestrator,
   writeFirstTasks,
   writeBedrockConfig,
+  writeDjToolingReference,
+  DJ_TOOLING_REFERENCE_PATH,
 } = require('../profileWriter');
 
 function withTmp(t) {
@@ -148,6 +150,48 @@ test('writeFirstTasks: writes file into profile dir', async (t) => {
   const r = await writeFirstTasks(dir, '# first tasks\n');
   assert.strictEqual(r.ok, true);
   assert.strictEqual(fs.readFileSync(path.join(dir, 'first-tasks.md'), 'utf8'), '# first tasks\n');
+});
+
+test('writeDjToolingReference: copies the shipped reference into the profile dir', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  const r = await writeDjToolingReference({ profileDir: dir });
+  assert.strictEqual(r.ok, true);
+  const written = fs.readFileSync(path.join(dir, 'dj-tooling.md'), 'utf8');
+  // Sanity: matches the shipped source byte-for-byte.
+  const shipped = fs.readFileSync(DJ_TOOLING_REFERENCE_PATH, 'utf8');
+  assert.strictEqual(written, shipped);
+  // Sanity: covers the load-bearing Google Workspace guidance.
+  assert.match(written, /gemini-cli-extensions\/workspace/);
+  assert.match(written, /DJ org-policy blockers/);
+  assert.match(written, /do not apply to this MCP/);
+});
+
+test('writeDjToolingReference: honors an override sourcePath', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  const src = path.join(tmp, 'custom-ref.md');
+  fs.writeFileSync(src, '# custom reference\n');
+  const r = await writeDjToolingReference({ profileDir: dir, sourcePath: src });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(
+    fs.readFileSync(path.join(dir, 'dj-tooling.md'), 'utf8'),
+    '# custom reference\n',
+  );
+});
+
+test('writeDjToolingReference: returns error when source cannot be read', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  const r = await writeDjToolingReference({
+    profileDir: dir,
+    sourcePath: path.join(tmp, 'does-not-exist.md'),
+  });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /ENOENT|no such file/i);
 });
 
 test('writeBedrockConfig: writes config.yaml and .env with correct values', async (t) => {

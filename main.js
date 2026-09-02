@@ -8,6 +8,7 @@ const { AcpClient } = require('./acpClient');
 const { runOnboarding, firstRunNeeded, listRealProfiles } = require('./onboarding/main');
 const { loadProfiles: loadProfilesFromList } = require('./profileList');
 const { setupCaTrust } = require('./caTrust');
+const { writeDjToolingReference } = require('./profileWriter');
 
 app.setName('Circe');
 log.initialize();
@@ -337,6 +338,19 @@ function adoptLegacyState() {
     `Adopted ${real.length} existing profile(s); wizard skipped. ` +
     `orchestratorProfile=${orchestrator}`,
   );
+  // Drop the DJ-tooling reference into every adopted profile so orchestrators
+  // and specialists alike have the same on-disk pointer the wizard would have
+  // written. Idempotent overwrite — the shipped file is source of truth.
+  for (const name of real) {
+    const profileDir = path.join(HERMES_HOME, 'profiles', name);
+    writeDjToolingReference({ profileDir })
+      .then((r) => {
+        if (!r.ok) {
+          log.warn(`dj-tooling.md write failed for ${name}: ${r.error}`);
+        }
+      })
+      .catch((err) => log.warn(`dj-tooling.md write threw for ${name}: ${err.message}`));
+  }
 }
 
 app.whenReady().then(async () => {

@@ -108,6 +108,25 @@ async function writeFirstTasks(profileDir, content) {
   }
 }
 
+const DJ_TOOLING_REFERENCE_PATH = path.join(
+  __dirname,
+  'onboarding',
+  'references',
+  'dj-tooling.md',
+);
+
+async function writeDjToolingReference({ profileDir, sourcePath }) {
+  try {
+    const src = sourcePath || DJ_TOOLING_REFERENCE_PATH;
+    const content = fs.readFileSync(src, 'utf8');
+    fs.mkdirSync(profileDir, { recursive: true });
+    fs.writeFileSync(path.join(profileDir, 'dj-tooling.md'), content);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
 async function writeBedrockConfig({ profileDir, apiKey }) {
   // Register the same platform toolsets Circe's hand-tuned profiles use.
   // Without these, Claude has no local scaffolding (no memory/todo/skills/
@@ -145,4 +164,11 @@ async function writeBedrockConfig({ profileDir, apiKey }) {
   }
 }
 
-module.exports = { slugify, createOrchestrator, writeFirstTasks, writeBedrockConfig };
+module.exports = {
+  slugify,
+  createOrchestrator,
+  writeFirstTasks,
+  writeBedrockConfig,
+  writeDjToolingReference,
+  DJ_TOOLING_REFERENCE_PATH,
+};

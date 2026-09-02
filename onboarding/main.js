@@ -353,6 +353,17 @@ async function runOnboarding({ hermesHome, stateDir, hermesBin, logFilePath, onB
       });
       return { ok: false, rolledBack: true, error: cfg.error };
     }
+    // Drop the DJ-tooling reference next to SOUL.md so the orchestrator can
+    // read it when tooling questions come up. Not fatal if it fails — the
+    // profile is otherwise complete and the doc can be re-copied later.
+    const refRes = await profileWriter.writeDjToolingReference({
+      profileDir: create.profileDir,
+    });
+    if (!refRes.ok) {
+      // Log-only; don't block onboarding on this.
+      // eslint-disable-next-line no-console
+      console.warn(`dj-tooling.md write failed: ${refRes.error}`);
+    }
     return { ok: true, profileDir: create.profileDir };
   });
 
