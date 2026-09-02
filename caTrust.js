@@ -77,16 +77,20 @@ async function setupCaTrust(opts) {
       try {
         certifiContent = readFile(certifiPath);
       } catch {
-        // certifi file not readable, fall back to zscaler-only
+        // certifi file not readable; treat as unresolved
       }
     }
+    let wroteBundle = false;
     if (certifiContent) {
       fs.writeFileSync(bPath, certifiContent + det.pem);
       notes.push(`wrote ${bPath} (certifi + zscaler)`);
+      wroteBundle = true;
     } else {
-      fs.writeFileSync(bPath, det.pem);
-      notes.push(`wrote ${bPath} (zscaler only — certifi unresolved)`);
-      log.warn('caTrust: certifi.where() unresolvable; SSL_CERT_FILE points to zscaler-only bundle');
+      // A zscaler-only SSL_CERT_FILE would strip Python's default public roots,
+      // breaking every HTTPS call whose server chain is anchored on a public CA
+      // (e.g. bedrock-mantle). Prefer leaving SSL_CERT_FILE unset so Python's
+      // interpreter-local certifi (Hermes ships its own venv with certifi) is used.
+      log.warn('caTrust: certifi.where() unresolvable; skipping SSL_CERT_FILE (Python will use its own certifi)');
     }
 
     if (process.env.NODE_EXTRA_CA_CERTS) {
@@ -97,7 +101,7 @@ async function setupCaTrust(opts) {
     }
     if (process.env.SSL_CERT_FILE) {
       log.info(`caTrust: SSL_CERT_FILE already set (${process.env.SSL_CERT_FILE}); leaving alone`);
-    } else {
+    } else if (wroteBundle) {
       process.env.SSL_CERT_FILE = bPath;
       notes.push(`set SSL_CERT_FILE=${bPath}`);
     }

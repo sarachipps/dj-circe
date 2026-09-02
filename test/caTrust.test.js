@@ -86,7 +86,7 @@ test('setupCaTrust: writes both bundle files and sets env when Zscaler present',
   assert.strictEqual(process.env.SSL_CERT_FILE, bPath);
 });
 
-test('setupCaTrust: falls back to zscaler-only bundle when certifi unresolvable', async (t) => {
+test('setupCaTrust: leaves SSL_CERT_FILE unset when certifi unresolvable (avoids zscaler-only bundle)', async (t) => {
   const originalNode = process.env.NODE_EXTRA_CA_CERTS;
   const originalSsl = process.env.SSL_CERT_FILE;
   delete process.env.NODE_EXTRA_CA_CERTS;
@@ -110,9 +110,13 @@ test('setupCaTrust: falls back to zscaler-only bundle when certifi unresolvable'
     exec,
   });
   assert.strictEqual(result.ok, true);
-  const bPath = path.join(ud, 'python-ca-bundle.pem');
-  assert.strictEqual(fs.readFileSync(bPath, 'utf8'), FAKE_PEM);
-  assert.strictEqual(process.env.SSL_CERT_FILE, bPath);
+  // Zscaler root is still written so Node can pick it up.
+  const zPath = path.join(ud, 'zscaler-root.pem');
+  assert.strictEqual(fs.readFileSync(zPath, 'utf8'), FAKE_PEM);
+  assert.strictEqual(process.env.NODE_EXTRA_CA_CERTS, zPath);
+  // But SSL_CERT_FILE must NOT point to a zscaler-only bundle — that would
+  // strip Python's default public CAs and break bedrock-mantle etc.
+  assert.strictEqual(process.env.SSL_CERT_FILE, undefined);
 });
 
 test('setupCaTrust: skips silently when no Zscaler root', async (t) => {
