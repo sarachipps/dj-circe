@@ -341,6 +341,83 @@ test('acpClient: loadSession records the sessionId for later resume', async () =
   assert.strictEqual(c._lastSessionId, 'sess-loaded');
 });
 
+test('acpClient: prompt() absorbs auto-restart and retries once after resume', async () => {
+  // The exact user-facing bug: user types a prompt, Hermes hits the
+  // auth-rebuild TypeError mid-stream, _attemptAutoRestart rejects the
+  // in-flight session/prompt with autoRestartInProgress=true. Before this
+  // fix, that rejection surfaced to the renderer as an AcpError and the
+  // user's message was dropped. Now prompt() waits for the restart to
+  // settle and re-sends session/prompt against the resumed session.
+  const c = new AcpClient({ profile: 'testp' });
+  c._child = { kill: () => {}, stdin: { writable: false, write: () => {} } };
+  c._ready = Promise.resolve();
+  c._lastSessionId = 'sess-live';
+  c.start = () => { c._ready = Promise.resolve(); return c._ready; };
+
+  const promptParams = [];
+  let promptCalls = 0;
+  // Model the real transport: first prompt call gets a pending entry
+  // that _attemptAutoRestart will reject; second gets a fast success.
+  c._send = (method, params) => {
+    if (method === 'session/prompt') {
+      promptCalls++;
+      promptParams.push(params);
+      if (promptCalls === 1) {
+        return new Promise((resolve, reject) => {
+          const id = c._nextId++;
+          c._pending.set(id, { resolve, reject });
+          // Trigger auto-restart in a later tick so the reject happens
+          // to a real pending entry.
+          setImmediate(() => {
+            c._attemptAutoRestart('unit-test').catch(() => {});
+          });
+        });
+      }
+      return Promise.resolve({ ok: 'retried' });
+    }
+    return Promise.resolve({});
+  };
+
+  const result = await c.prompt('sess-live', 'hello');
+  assert.deepStrictEqual(result, { ok: 'retried' });
+  assert.strictEqual(promptCalls, 2, 'prompt should retry exactly once');
+  assert.strictEqual(promptParams[1].sessionId, 'sess-live');
+});
+
+test('acpClient: prompt() propagates non-restart errors unchanged', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  c._send = async () => {
+    const err = new Error('something else broke');
+    err.code = -32603;
+    throw err;
+  };
+  const err = await c.prompt('sess-x', 'hi').catch((e) => e);
+  assert.strictEqual(err.message, 'something else broke');
+  assert.strictEqual(err.code, -32603);
+});
+
+test('acpClient: prompt() surfaces error if auto-restart itself fails', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  // Simulate: prompt gets the autoRestartInProgress reject, but the
+  // restart itself never succeeds (start() throws).
+  c.start = () => { throw new Error('spawn failed'); };
+  c._child = { kill: () => {}, stdin: { writable: false, write: () => {} } };
+  c._send = async (method) => {
+    if (method === 'session/prompt') {
+      const err = new Error('acp auto-restart in progress (fail-test)');
+      err.autoRestartInProgress = true;
+      // Kick off the failing restart.
+      setImmediate(() => { c._attemptAutoRestart('fail-test').catch(() => {}); });
+      throw err;
+    }
+    return {};
+  };
+  const err = await c.prompt('sess-x', 'hi').catch((e) => e);
+  assert.ok(err && err.autoRestartInProgress, 'error should still be the tagged rejection');
+});
+
 test('acpClient: old child exit after auto-restart does not reject new pending', async () => {
   // Reproduces the race where the OLD child's async 'exit' event fires
   // after the NEW child has already started, walks the shared _pending

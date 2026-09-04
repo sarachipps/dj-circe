@@ -110,6 +110,11 @@ class AcpClient {
     this._autoRestartTimes = []; // wall-clock ms of prior triggers
     this._lastAutoRestartTriggerAt = 0;
     this._autoRestarting = false;
+    // Promise that resolves when the current auto-restart finishes (or
+    // rejects if it gives up). prompt() awaits this so a call that was
+    // in-flight when the restart began gets absorbed instead of surfacing
+    // an "acp auto-restart in progress" AcpError to the renderer.
+    this._autoRestartPromise = null;
     // Set to true by stop() so we don't try to auto-restart a client the
     // window was closing anyway.
     this._stopped = false;
@@ -253,10 +258,25 @@ class AcpClient {
 
   async prompt(sessionId, text) {
     await this._ready;
-    return this._send('session/prompt', {
-      sessionId,
-      prompt: [{ type: 'text', text }],
-    });
+    try {
+      return await this._send('session/prompt', {
+        sessionId,
+        prompt: [{ type: 'text', text }],
+      });
+    } catch (err) {
+      // The user's in-flight prompt got caught by auto-restart. Wait for
+      // the restart to settle and reissue against the same session id —
+      // _attemptAutoRestart already called session/load, so the sessionId
+      // is still live. Only retry once; a second consecutive restart
+      // means something worse is happening and the caller should see it.
+      if (!err || !err.autoRestartInProgress) throw err;
+      const settled = await (this._autoRestartPromise || Promise.resolve({ ok: false }));
+      if (!settled || !settled.ok) throw err;
+      return this._send('session/prompt', {
+        sessionId,
+        prompt: [{ type: 'text', text }],
+      });
+    }
   }
 
   async cancelSession(sessionId) {
@@ -325,6 +345,12 @@ class AcpClient {
     }
     this._autoRestartTimes.push(now);
     this._autoRestarting = true;
+    // Publish a settle-tracking promise BEFORE we reject in-flight pending
+    // calls. prompt() (and any other caller that survives a restart) will
+    // await this promise to reissue its RPC against the resumed session
+    // instead of surfacing an AcpError to the renderer.
+    let settleRestart;
+    this._autoRestartPromise = new Promise((res) => { settleRestart = res; });
     const sessionId = this._lastSessionId;
     try {
       this.onAutoRestart({ phase: 'detected', reason, sessionId });
@@ -332,9 +358,14 @@ class AcpClient {
     log.warn(`acp auto-restart begin [${this.profile}] reason=${reason} sessionId=${sessionId || '(none)'}`);
     try {
       // Reject anything still in flight so awaiters unblock — the child is
-      // about to die and their responses will never come.
+      // about to die and their responses will never come. Tag the error
+      // so prompt() (and any other caller that wants to survive a restart)
+      // can distinguish this from a real failure and retry after the
+      // restart settles.
       for (const [, p] of this._pending) {
-        try { p.reject(new Error(`acp auto-restart in progress (${reason})`)); } catch {}
+        const err = new Error(`acp auto-restart in progress (${reason})`);
+        err.autoRestartInProgress = true;
+        try { p.reject(err); } catch {}
       }
       this._pending.clear();
       this.cancelPendingPermissions();
@@ -380,13 +411,16 @@ class AcpClient {
       try {
         this.onAutoRestart({ phase: 'restarted', reason, sessionId });
       } catch {}
+      settleRestart({ ok: true, sessionId });
     } catch (err) {
       log.error(`acp auto-restart failed [${this.profile}]`, err);
       try {
         this.onAutoRestart({ phase: 'givingUp', reason: err.message || String(err), trigger: reason });
       } catch {}
+      settleRestart({ ok: false, error: err });
     } finally {
       this._autoRestarting = false;
+      this._autoRestartPromise = null;
     }
   }
 
