@@ -244,6 +244,10 @@ function createTileWindow(profile, index) {
       if (win.isDestroyed()) return;
       win.webContents.send('acp:permission', payload);
     },
+    onAutoRestart: (payload) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send('acp:autoRestart', payload);
+    },
   });
   tileClients.set(wcId, client);
   client.start().catch((err) => {

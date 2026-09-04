@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('hermes', {
   onError: (fn) => ipcRenderer.on('acp:error', (_e, params) => fn(params)),
   onExit: (fn) => ipcRenderer.on('acp:exit', (_e, params) => fn(params)),
   onRetryStatus: (fn) => ipcRenderer.on('acp:retryStatus', (_e, params) => fn(params)),
+  onAutoRestart: (fn) => ipcRenderer.on('acp:autoRestart', (_e, params) => fn(params)),
   access: {
     get: () => ipcRenderer.invoke('access:get'),
     set: (mode) => ipcRenderer.invoke('access:set', { mode }),

@@ -487,6 +487,35 @@ if (window.hermes.onRetryStatus) {
   });
 }
 
+// Auto-restart notifications: fired when acpClient detects the upstream
+// Hermes auth-rebuild TypeError and respawns the child in place. Show a
+// transient status line per phase so the user knows the tile is recovering
+// (rather than frozen).
+if (window.hermes.onAutoRestart) {
+  window.hermes.onAutoRestart((payload) => {
+    const tab = activeTab();
+    if (!tab) return;
+    let text;
+    if (payload.phase === 'detected') {
+      text = 'Agent hit a transient auth bug — recovering…';
+    } else if (payload.phase === 'restarting') {
+      text = 'Restarting agent process…';
+    } else if (payload.phase === 'restarted') {
+      text = 'Recovered. You can keep going.';
+      tab.busy = false;
+      updateComposer();
+    } else if (payload.phase === 'givingUp') {
+      text =
+        payload.reason === 'rate-limit'
+          ? 'Auto-recovery hit its retry limit. Try closing and reopening this tile.'
+          : `Auto-recovery failed (${payload.reason || 'unknown'}). Try closing and reopening this tile.`;
+    } else {
+      return;
+    }
+    appendMessage(tab, 'agent', text, 'retry');
+  });
+}
+
 window.hermes.onExit(({ code }) => {
   for (const tab of tabs) {
     appendMessage(tab, 'agent', `agent exited (${code})`, 'error');

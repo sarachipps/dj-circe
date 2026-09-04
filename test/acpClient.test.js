@@ -213,6 +213,134 @@ test('acpClient.newSession: CIRCE_NO_RETRY=1 disables retries', async (t) => {
   assert.strictEqual(calls, 1);
 });
 
+// ─── Auto-restart on Hermes auth-rebuild bug ─────────────────────────────
+
+function makeAutoRestartClient({ startImpl, sendImpl } = {}) {
+  const events = [];
+  const c = new AcpClient({
+    profile: 'testp',
+    onAutoRestart: (p) => events.push(p),
+  });
+  // Skip the real spawn — pretend the child is up.
+  c._child = { kill: () => {}, stdin: { writable: false, write: () => {} } };
+  c._ready = Promise.resolve();
+  c.start = startImpl || (() => { c._ready = Promise.resolve(); return c._ready; });
+  c._send = sendImpl || (async () => ({}));
+  return { c, events };
+}
+
+test('acpClient: stderr with auth-rebuild pattern triggers auto-restart', async () => {
+  const { c, events } = makeAutoRestartClient();
+  c._lastSessionId = 'sess-abc';
+  c._onStderr('[acp:testp] ⚠️  API call failed (attempt 1/3)\n');
+  c._onStderr('   📝 Error: "Could not resolve authentication method. Expected either api_key or auth_token…"\n');
+  // Give the microtask queue time to run the async coroutine.
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  const phases = events.map((e) => e.phase);
+  assert.deepStrictEqual(phases, ['detected', 'restarting', 'restarted']);
+  assert.strictEqual(events[0].sessionId, 'sess-abc');
+});
+
+test('acpClient: stderr without pattern does NOT trigger auto-restart', async () => {
+  const { c, events } = makeAutoRestartClient();
+  c._onStderr('[acp:testp] 2026-09-03 11:35:17 [INFO] normal log line\n');
+  c._onStderr('[acp:testp] some other error that we do not auto-recover from\n');
+  await new Promise((r) => setImmediate(r));
+  assert.deepStrictEqual(events, []);
+});
+
+test('acpClient: repeat matches within debounce window count as one restart', async () => {
+  const { c, events } = makeAutoRestartClient();
+  c._onStderr('Error: "Could not resolve authentication method."\n');
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  // Same failure spraying stderr — should NOT retrigger.
+  c._onStderr('Error: "Could not resolve authentication method."\n');
+  c._onStderr('Error: "Could not resolve authentication method."\n');
+  await new Promise((r) => setImmediate(r));
+  const detected = events.filter((e) => e.phase === 'detected').length;
+  assert.strictEqual(detected, 1);
+});
+
+test('acpClient: after 3 restarts in the window, further triggers fire givingUp', async () => {
+  const { c, events } = makeAutoRestartClient();
+  // Directly invoke the coroutine three times bypassing the debounce so
+  // we're testing the rate limiter, not the debouncer.
+  await c._attemptAutoRestart('t1');
+  await c._attemptAutoRestart('t2');
+  await c._attemptAutoRestart('t3');
+  await c._attemptAutoRestart('t4');
+  const givingUp = events.find((e) => e.phase === 'givingUp' && e.reason === 'rate-limit');
+  assert.ok(givingUp, 'expected a givingUp/rate-limit event on the 4th attempt');
+  assert.strictEqual(givingUp.trigger, 't4');
+});
+
+test('acpClient: auto-restart calls session/load when a sessionId is known', async () => {
+  const sent = [];
+  const { c } = makeAutoRestartClient({
+    sendImpl: async (method, params) => {
+      sent.push({ method, params });
+      return {};
+    },
+  });
+  c._lastSessionId = 'sess-42';
+  await c._attemptAutoRestart('unit-test');
+  const loadCall = sent.find((s) => s.method === 'session/load');
+  assert.ok(loadCall, 'expected session/load after restart');
+  assert.strictEqual(loadCall.params.sessionId, 'sess-42');
+});
+
+test('acpClient: auto-restart skips session/load when there is no known session', async () => {
+  const sent = [];
+  const { c } = makeAutoRestartClient({
+    sendImpl: async (method, params) => {
+      sent.push({ method, params });
+      return {};
+    },
+  });
+  c._lastSessionId = null;
+  await c._attemptAutoRestart('unit-test');
+  assert.strictEqual(sent.find((s) => s.method === 'session/load'), undefined);
+});
+
+test('acpClient: stop() prevents future auto-restart attempts', async () => {
+  const { c, events } = makeAutoRestartClient();
+  c.stop();
+  c._onStderr('Error: "Could not resolve authentication method."\n');
+  await new Promise((r) => setImmediate(r));
+  assert.deepStrictEqual(events, []);
+});
+
+test('acpClient: pattern split across two stderr chunks still matches', async () => {
+  const { c, events } = makeAutoRestartClient();
+  c._onStderr('some prefix ... Could not resolve ');
+  c._onStderr('authentication method. Expected either api_key…\n');
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(events.find((e) => e.phase === 'detected'));
+});
+
+test('acpClient: newSession records the returned sessionId for later resume', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  c._send = async (method) => {
+    if (method === 'session/new') return { sessionId: 'sess-record' };
+    return {};
+  };
+  const id = await c.newSession();
+  assert.strictEqual(id, 'sess-record');
+  assert.strictEqual(c._lastSessionId, 'sess-record');
+});
+
+test('acpClient: loadSession records the sessionId for later resume', async () => {
+  const c = new AcpClient({ profile: 'testp' });
+  c._ready = Promise.resolve();
+  c._send = async () => ({});
+  await c.loadSession('sess-loaded');
+  assert.strictEqual(c._lastSessionId, 'sess-loaded');
+});
+
 test('acpClient.newSession: onRetry fires with attempt number and error', async () => {
   const c = new AcpClient({ profile: 'testp' });
   c._ready = Promise.resolve();

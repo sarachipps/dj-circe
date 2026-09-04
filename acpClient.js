@@ -61,6 +61,24 @@ function loadProfileEnv(profile) {
 //   'locked'   — auto-deny every request
 const ACCESS_MODES = ['locked', 'ask', 'unlocked'];
 
+// Substring that marks the upstream Hermes bug where the stream-retry path
+// rebuilds the Anthropic-wire client without threading api_key through, so
+// the SDK throws TypeError at construction. See circe-dj docs and the
+// pending Hermes bug report — pattern mirrors closed OpenAI-wire fix #44006.
+// The exact string is the Anthropic SDK's own error text, distinctive
+// enough that a substring match won't false-positive on normal log lines.
+const HERMES_AUTH_REBUILD_PATTERN = 'Could not resolve authentication method';
+
+// Rate-limit auto-restarts to avoid tight loops if the pattern is somehow
+// misdiagnosed. Keep it forgiving (a real fleet member should never trip
+// this three times in a session) but hard-capped.
+const AUTO_RESTART_WINDOW_MS = 5 * 60 * 1000;
+const AUTO_RESTART_MAX_IN_WINDOW = 3;
+// Suppression window: multiple stderr lines from the same failure burst
+// arrive within a fraction of a second. Ignore repeat matches inside this
+// window so a single failure counts as one restart, not three.
+const AUTO_RESTART_DEBOUNCE_MS = 2000;
+
 // Classify an ACP option object. `kind` is the strongest signal (per ACP spec
 // options carry allow_once / allow_always / reject_once / reject_always);
 // fall back to name/optionId keyword matching for less strict servers.
@@ -70,22 +88,35 @@ const isRejectOption = (o) =>
   (o?.kind?.startsWith('reject')) || /reject|deny|no|cancel|decline|refuse/i.test(o?.name || o?.optionId || '');
 
 class AcpClient {
-  constructor({ profile, cwd = os.homedir(), onUpdate, onExit, onPermissionRequest, accessMode = 'unlocked' }) {
+  constructor({ profile, cwd = os.homedir(), onUpdate, onExit, onPermissionRequest, onAutoRestart, accessMode = 'unlocked' }) {
     this.profile = profile;
     this.cwd = cwd;
     this.onUpdate = onUpdate || (() => {});
     this.onExit = onExit || (() => {});
     this.onPermissionRequest = onPermissionRequest || (() => {});
+    this.onAutoRestart = onAutoRestart || (() => {});
     this.accessMode = ACCESS_MODES.includes(accessMode) ? accessMode : 'unlocked';
     this._nextId = 1;
     this._pending = new Map();
     this._stdoutBuf = '';
+    this._stderrBuf = '';
     this._ready = null;
     this._child = null;
     // Outstanding permission requests waiting on the user (mode='ask').
     // key: internal requestKey (string), value: { rpcId, params }
     this._pendingPermissions = new Map();
     this._nextPermKey = 1;
+    // Auto-restart bookkeeping.
+    this._autoRestartTimes = []; // wall-clock ms of prior triggers
+    this._lastAutoRestartTriggerAt = 0;
+    this._autoRestarting = false;
+    // Set to true by stop() so we don't try to auto-restart a client the
+    // window was closing anyway.
+    this._stopped = false;
+    // Track the last session id from newSession/loadSession so the renderer
+    // can decide whether to resume after we auto-restart. Optional — the
+    // renderer is authoritative, but exposing this simplifies its logic.
+    this._lastSessionId = null;
   }
 
   setAccessMode(mode) {
@@ -159,13 +190,20 @@ class AcpClient {
     );
     this._child.stdout.on('data', (b) => this._onStdout(b.toString()));
     this._child.stderr.on('data', (b) => {
-      process.stderr.write(`[acp:${this.profile}] ${b}`);
+      const s = b.toString();
+      process.stderr.write(`[acp:${this.profile}] ${s}`);
+      this._onStderr(s);
     });
     this._child.on('exit', (code) => {
       for (const [, p] of this._pending) {
         p.reject(new Error(`hermes acp exited (${code})`));
       }
       this._pending.clear();
+      // If we're mid-auto-restart, swallow the exit — a fresh child is
+      // about to spawn; firing onExit here would tear down the tile the
+      // user is trying to keep. If the auto-restart itself fails, we surface
+      // it via a distinct autoRestart('givingUp', ...) event instead.
+      if (this._autoRestarting) return;
       this.onExit(code);
     });
 
@@ -199,11 +237,13 @@ class AcpClient {
         disabled,
       },
     );
+    this._lastSessionId = r.sessionId;
     return r.sessionId;
   }
 
   async loadSession(sessionId) {
     await this._ready;
+    this._lastSessionId = sessionId;
     return this._send('session/load', {
       cwd: this.cwd,
       sessionId,
@@ -232,10 +272,113 @@ class AcpClient {
   }
 
   stop() {
+    this._stopped = true;
     this.cancelPendingPermissions();
     if (this._child) {
       this._child.kill();
       this._child = null;
+    }
+  }
+
+  // Scan stderr for the Hermes stream-retry auth-rebuild pattern. Buffer
+  // partial lines so a match split across two chunks still fires. Rate-limit
+  // triggers so a burst of identical stderr from one failure counts once.
+  _onStderr(chunk) {
+    this._stderrBuf += chunk;
+    // Cap the buffer so a chatty child can't grow it unbounded; only the
+    // tail matters for pattern detection.
+    if (this._stderrBuf.length > 16 * 1024) {
+      this._stderrBuf = this._stderrBuf.slice(-8 * 1024);
+    }
+    if (!this._stderrBuf.includes(HERMES_AUTH_REBUILD_PATTERN)) return;
+    // Consume up through the last newline so we don't retrigger on the
+    // same buffered text next chunk.
+    const lastNl = this._stderrBuf.lastIndexOf('\n');
+    if (lastNl >= 0) this._stderrBuf = this._stderrBuf.slice(lastNl + 1);
+    const now = Date.now();
+    if (now - this._lastAutoRestartTriggerAt < AUTO_RESTART_DEBOUNCE_MS) return;
+    this._lastAutoRestartTriggerAt = now;
+    // Fire and forget; the coroutine handles its own errors via events.
+    this._attemptAutoRestart('hermes-auth-rebuild').catch((err) => {
+      try { log.error(`acp auto-restart crashed [${this.profile}]`, err); } catch {}
+    });
+  }
+
+  // Kill the child, drop pending RPC promises, spawn a fresh one, and
+  // re-init the protocol. Rate-limited. Emits onAutoRestart('detected'),
+  // then either ('restarted', {sessionId}) on success or ('givingUp', {reason}).
+  async _attemptAutoRestart(reason) {
+    if (this._stopped) return;
+    if (this._autoRestarting) return;
+    // Rate limit: prune expired entries, then bail if we've hit the cap.
+    const now = Date.now();
+    this._autoRestartTimes = this._autoRestartTimes.filter((t) => now - t < AUTO_RESTART_WINDOW_MS);
+    if (this._autoRestartTimes.length >= AUTO_RESTART_MAX_IN_WINDOW) {
+      try {
+        this.onAutoRestart({ phase: 'givingUp', reason: 'rate-limit', trigger: reason });
+      } catch {}
+      log.warn(
+        `acp auto-restart rate-limited [${this.profile}] ` +
+        `(${this._autoRestartTimes.length} in ${AUTO_RESTART_WINDOW_MS / 1000}s)`,
+      );
+      return;
+    }
+    this._autoRestartTimes.push(now);
+    this._autoRestarting = true;
+    const sessionId = this._lastSessionId;
+    try {
+      this.onAutoRestart({ phase: 'detected', reason, sessionId });
+    } catch {}
+    log.warn(`acp auto-restart begin [${this.profile}] reason=${reason} sessionId=${sessionId || '(none)'}`);
+    try {
+      // Reject anything still in flight so awaiters unblock — the child is
+      // about to die and their responses will never come.
+      for (const [, p] of this._pending) {
+        try { p.reject(new Error(`acp auto-restart in progress (${reason})`)); } catch {}
+      }
+      this._pending.clear();
+      this.cancelPendingPermissions();
+      // Reset transport state.
+      this._stdoutBuf = '';
+      this._stderrBuf = '';
+      this._ready = null;
+      // Kill the current child; the exit handler is guarded by
+      // this._autoRestarting so it won't fire onExit.
+      if (this._child) {
+        try { this._child.kill(); } catch {}
+        this._child = null;
+      }
+      try {
+        this.onAutoRestart({ phase: 'restarting', reason, sessionId });
+      } catch {}
+      // Fresh spawn + protocol init. start() sets this._ready.
+      this.start();
+      await this._ready;
+      // If the tile had a live session, tell Hermes to resume it so the
+      // renderer's history and next prompt continue to work.
+      if (sessionId) {
+        try {
+          await this._send('session/load', {
+            cwd: this.cwd,
+            sessionId,
+            mcpServers: [],
+          });
+        } catch (loadErr) {
+          log.warn(`acp auto-restart session/load failed [${this.profile}] ${loadErr.message}`);
+          // Fall through — the renderer can decide to newSession if load failed.
+        }
+      }
+      log.info(`acp auto-restart ok [${this.profile}] sessionId=${sessionId || '(none)'}`);
+      try {
+        this.onAutoRestart({ phase: 'restarted', reason, sessionId });
+      } catch {}
+    } catch (err) {
+      log.error(`acp auto-restart failed [${this.profile}]`, err);
+      try {
+        this.onAutoRestart({ phase: 'givingUp', reason: err.message || String(err), trigger: reason });
+      } catch {}
+    } finally {
+      this._autoRestarting = false;
     }
   }
 
