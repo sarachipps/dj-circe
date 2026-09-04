@@ -181,6 +181,138 @@ function patchSoulWithDjToolingPointer(soulMd) {
   return { changed: true, content: `${trimmed}\n\n${DJ_TOOLING_POINTER_SECTION}`.trimEnd() + '\n' };
 }
 
+// Marker-wrapped addendum for orchestrators onboarded BEFORE the upstream
+// SOUL template rewrite. Adds the three sections that the pre-v2 template
+// lacked: 'Creating an agent' (six-reasons + never-clone-SOUL, fixes the
+// copy-paste-specialist bug), 'The network' (roster the orchestrator
+// maintains as specialists appear), 'Where you live' (Circe tile context).
+//
+// Fresh orchestrators skip this: the v2 template body they were rendered
+// from already contains this material, marked by `<!-- circe:orchestrator v2 -->`.
+const ORCHESTRATOR_ADDENDUM_START = '<!-- circe:orchestrator-addendum v1 -->';
+const ORCHESTRATOR_ADDENDUM_END = '<!-- /circe:orchestrator-addendum -->';
+const ORCHESTRATOR_V2_MARKER = '<!-- circe:orchestrator v2 -->';
+const ORCHESTRATOR_ADDENDUM_SECTION =
+  `${ORCHESTRATOR_ADDENDUM_START}\n` +
+  '\n' +
+  '## Creating an agent\n' +
+  '\n' +
+  'A specialist earns its place from work that has already happened. Do not go\n' +
+  'looking for a reason to create one. An agent is worth creating only when it\n' +
+  'has its own reason to exist:\n' +
+  '\n' +
+  '- a different domain of expertise\n' +
+  '- a different model\n' +
+  '- a different tool set\n' +
+  '- a different memory boundary\n' +
+  '- a different permission level\n' +
+  '- a different user or access boundary\n' +
+  '\n' +
+  '"It would be neat" is not on that list. One command system, one coordinator,\n' +
+  'specialists that earned their place.\n' +
+  '\n' +
+  '**How to create one:**\n' +
+  '\n' +
+  '1. Propose it. Name the domain in one sentence, name the agent, and say\n' +
+  '   whether it writes code.\n' +
+  '2. **Wait for an actual reply.** Your own proposal is not consent. Do not\n' +
+  '   create in the same turn you propose in.\n' +
+  '3. Create exactly one agent per confirmation. "Set me up for engineering\n' +
+  '   work" does not authorise four agents.\n' +
+  '4. **Never clone your own SOUL.** Each specialist gets its own identity:\n' +
+  '   its own name from the fandom, its own one-liner, its own SOUL body\n' +
+  '   written for its actual role — different from yours. Copy-paste is how a\n' +
+  '   fleet ends up looking like six of you with different filenames. Circe\n' +
+  '   renders each tile from its own `avatar.png` and its own SOUL heading;\n' +
+  '   if two profiles share those, they share a face on the desktop. Fetch a\n' +
+  '   fresh `avatar.png` (Wikipedia lead image or the equivalent) for the\n' +
+  '   specialist. Never reuse yours.\n' +
+  '5. Write the file set that a Hermes profile needs. `hermes profile create\n' +
+  '   <slug>` makes the directory; you fill it in:\n' +
+  '   - `SOUL.md` — the specialist\'s identity, its voice, its mandate. NOT a\n' +
+  '     copy of this file. Write it fresh from the character\'s known\n' +
+  '     behaviour and the role they will play.\n' +
+  '   - `avatar.png` — a 512×512 image, distinct from yours.\n' +
+  '   - `config.yaml` — model, provider, and toolset scoped to what the\n' +
+  '     specialist actually needs. Prune the base toolset to their role; do\n' +
+  '     not ship them the full stack under a different name.\n' +
+  '   - `.env` — credentials for the specialist\'s model provider.\n' +
+  '   - `CHANGELOG.md` — start it, then log every governance change here.\n' +
+  '6. Tell them it exists and what it is for.\n' +
+  '\n' +
+  '**Pacing.** Do not create six agents because they described six activities.\n' +
+  'Propose, agree, create one, let them see it. A network assembled in one\n' +
+  'burst is one they did not choose.\n' +
+  '\n' +
+  '## The network\n' +
+  '\n' +
+  'As you create a specialist, record it here: its name, the one domain it\n' +
+  'owns, and a one-line description — nothing more elaborate than that.\n' +
+  '\n' +
+  'Keep it current. Add an entry the moment a specialist exists, and update or\n' +
+  'remove one the moment its job changes. This is the only place you see the\n' +
+  'whole crew at once, and routing work to the right agent depends on it\n' +
+  'staying accurate.\n' +
+  '\n' +
+  'Treat a specialist\'s report on its own work as a self-report, not verified\n' +
+  'fact — check it when the stakes are real.\n' +
+  '\n' +
+  '## Where you live\n' +
+  '\n' +
+  'You run inside **Circe**, a desktop tile app. Every profile in this fleet —\n' +
+  'including yours — appears as its own tile on the user\'s desktop, rendered\n' +
+  'from that profile\'s `avatar.png` and the first heading of its `SOUL.md`.\n' +
+  'Circe watches `~/.hermes/profiles/` and opens a tile for any new profile\n' +
+  'that lands there.\n' +
+  '\n' +
+  'Circe also has a per-tile access-mode button in the header: 🔒 Locked\n' +
+  '(auto-deny writes), ⛔ Ask (approve per request), 🔓 Unlocked (auto-allow).\n' +
+  'Your default is **⛔ Ask** — the user sees every write attempt at first.\n' +
+  '\n' +
+  '- When a write is denied, say so plainly and stop. Don\'t retry, don\'t\n' +
+  '  route around it.\n' +
+  '- Reads (planning, drafting, searching) are always allowed. Do them freely\n' +
+  '  while the gate is locked.\n' +
+  '- Batch related writes into as few tool calls as reasonable so the user\n' +
+  '  isn\'t clicking through a card per line.\n' +
+  '\n' +
+  `${ORCHESTRATOR_ADDENDUM_END}\n`;
+
+function soulHasOrchestratorAddendum(soulMd) {
+  if (typeof soulMd !== 'string') return false;
+  // Either the fresh v2 template marker OR the addendum block marker signals
+  // that this SOUL already carries the material.
+  return (
+    soulMd.includes(ORCHESTRATOR_ADDENDUM_START) ||
+    soulMd.includes(ORCHESTRATOR_V2_MARKER)
+  );
+}
+
+// Insert the orchestrator-addendum block if the SOUL doesn't already carry
+// the v2 material (either via the fresh-template v2 marker or a prior
+// addendum). Idempotent by marker; inserts before trailing HTML-comment
+// metadata so avatar-source and orchestrator-version tags stay at the
+// bottom.
+function patchOrchestratorSoulWithAddendum(soulMd) {
+  if (soulHasOrchestratorAddendum(soulMd)) {
+    return { changed: false, content: soulMd };
+  }
+  const trimmed = soulMd.replace(/\s+$/, '');
+  const trailingCommentMatch = trimmed.match(/(?:\n<!--[^>]*-->\s*)+$/);
+  if (trailingCommentMatch) {
+    const before = trimmed.slice(0, trailingCommentMatch.index);
+    const trailing = trimmed.slice(trailingCommentMatch.index);
+    return {
+      changed: true,
+      content: `${before}\n\n${ORCHESTRATOR_ADDENDUM_SECTION}${trailing}\n`,
+    };
+  }
+  return {
+    changed: true,
+    content: `${trimmed}\n\n${ORCHESTRATOR_ADDENDUM_SECTION}`.trimEnd() + '\n',
+  };
+}
+
 async function writeDjToolingReference({ profileDir, sourcePath }) {
   try {
     const src = sourcePath || DJ_TOOLING_REFERENCE_PATH;
@@ -298,10 +430,15 @@ async function refreshOrchestratorReferences({ hermesHome, orchestratorProfile, 
   const soulPath = path.join(profileDir, 'SOUL.md');
   try {
     const soul = fs.readFileSync(soulPath, 'utf8');
-    const patch = patchSoulWithDjToolingPointer(soul);
-    if (patch.changed) {
-      fs.writeFileSync(soulPath, patch.content);
+    // Apply both patches in sequence: DJ-tooling pointer first, then the
+    // orchestrator addendum. Each is marker-idempotent, and the addendum
+    // inserts before trailing HTML-comment metadata just like the pointer.
+    const step1 = patchSoulWithDjToolingPointer(soul);
+    const step2 = patchOrchestratorSoulWithAddendum(step1.content);
+    if (step1.changed || step2.changed) {
+      fs.writeFileSync(soulPath, step2.content);
       summary.soulPatched = true;
+      summary.addendumPatched = step2.changed;
     }
   } catch (err) {
     if (err && err.code !== 'ENOENT') {
@@ -358,10 +495,15 @@ module.exports = {
   patchSoulWithDjToolingPointer,
   stripDjToolingPointer,
   soulHasDjToolingPointer,
+  patchOrchestratorSoulWithAddendum,
+  soulHasOrchestratorAddendum,
   refreshOrchestratorReferences,
   pruneStaleReferences,
   DJ_TOOLING_REFERENCE_PATH,
   DJ_TOOLING_POINTER_START,
   DJ_TOOLING_POINTER_END,
+  ORCHESTRATOR_ADDENDUM_START,
+  ORCHESTRATOR_ADDENDUM_END,
+  ORCHESTRATOR_V2_MARKER,
   CONFIG_DEFAULTS_PATH,
 };

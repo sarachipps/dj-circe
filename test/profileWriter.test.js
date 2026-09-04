@@ -13,11 +13,16 @@ const {
   patchSoulWithDjToolingPointer,
   stripDjToolingPointer,
   soulHasDjToolingPointer,
+  patchOrchestratorSoulWithAddendum,
+  soulHasOrchestratorAddendum,
   refreshOrchestratorReferences,
   pruneStaleReferences,
   DJ_TOOLING_REFERENCE_PATH,
   DJ_TOOLING_POINTER_START,
   DJ_TOOLING_POINTER_END,
+  ORCHESTRATOR_ADDENDUM_START,
+  ORCHESTRATOR_ADDENDUM_END,
+  ORCHESTRATOR_V2_MARKER,
 } = require('../profileWriter');
 
 function withTmp(t) {
@@ -429,6 +434,120 @@ test('pruneStaleReferences: idempotent when there is nothing to remove', async (
   assert.strictEqual(r.soulStripped, false);
   assert.strictEqual(r.referenceError, undefined);
   assert.strictEqual(r.soulError, undefined);
+});
+
+test('soulHasOrchestratorAddendum: detects both the addendum marker and the v2 template marker', () => {
+  assert.strictEqual(soulHasOrchestratorAddendum(''), false);
+  assert.strictEqual(soulHasOrchestratorAddendum(null), false);
+  assert.strictEqual(soulHasOrchestratorAddendum(undefined), false);
+  assert.strictEqual(soulHasOrchestratorAddendum('# picard\n'), false);
+  const withAddendum = `# picard\n\n${ORCHESTRATOR_ADDENDUM_START}\nbody\n${ORCHESTRATOR_ADDENDUM_END}\n`;
+  assert.strictEqual(soulHasOrchestratorAddendum(withAddendum), true);
+  const withV2 = `# picard\n\nBody.\n\n${ORCHESTRATOR_V2_MARKER}\n`;
+  assert.strictEqual(soulHasOrchestratorAddendum(withV2), true);
+});
+
+test('patchOrchestratorSoulWithAddendum: adds section when missing (no trailing comments)', () => {
+  const soul = '# Picard\n\nA starfleet captain.\n';
+  const r = patchOrchestratorSoulWithAddendum(soul);
+  assert.strictEqual(r.changed, true);
+  assert.ok(r.content.includes(ORCHESTRATOR_ADDENDUM_START));
+  assert.ok(r.content.includes(ORCHESTRATOR_ADDENDUM_END));
+  // Load-bearing content lands in SOUL.
+  assert.match(r.content, /Creating an agent/);
+  assert.match(r.content, /Never clone your own SOUL/);
+  assert.match(r.content, /The network/);
+  assert.match(r.content, /Where you live/);
+  assert.match(r.content, /Circe/);
+  // Original prose preserved.
+  assert.match(r.content, /A starfleet captain\./);
+});
+
+test('patchOrchestratorSoulWithAddendum: inserts BEFORE trailing HTML-comment metadata', () => {
+  const soul =
+    '# Picard\n\nBody text.\n\n' +
+    '<!-- circe:orchestrator v1 -->\n' +
+    '<!-- avatar-source: https://example.com/picard.png -->\n';
+  const r = patchOrchestratorSoulWithAddendum(soul);
+  assert.strictEqual(r.changed, true);
+  const addendumIdx = r.content.indexOf(ORCHESTRATOR_ADDENDUM_START);
+  const orchIdx = r.content.indexOf('<!-- circe:orchestrator v1 -->');
+  const avatarIdx = r.content.indexOf('<!-- avatar-source:');
+  assert.ok(addendumIdx > 0);
+  assert.ok(addendumIdx < orchIdx, 'addendum must appear before trailing metadata');
+  assert.ok(addendumIdx < avatarIdx, 'addendum must appear before trailing metadata');
+  assert.match(r.content, /Body text\./);
+});
+
+test('patchOrchestratorSoulWithAddendum: idempotent when marker already present', () => {
+  const soul = '# Picard\n\nBody.\n';
+  const once = patchOrchestratorSoulWithAddendum(soul);
+  assert.strictEqual(once.changed, true);
+  const twice = patchOrchestratorSoulWithAddendum(once.content);
+  assert.strictEqual(twice.changed, false);
+  assert.strictEqual(twice.content, once.content);
+});
+
+test('patchOrchestratorSoulWithAddendum: skips fresh v2-template SOULs (marker in body)', () => {
+  const soul =
+    '# Picard\n\nA starfleet captain.\n\n' +
+    `${ORCHESTRATOR_V2_MARKER}\n` +
+    '<!-- avatar-source: https://example.com/picard.png -->\n';
+  const r = patchOrchestratorSoulWithAddendum(soul);
+  assert.strictEqual(r.changed, false);
+  assert.strictEqual(r.content, soul);
+  // Did NOT stack the addendum on top of already-rendered v2 content.
+  assert.strictEqual(r.content.includes(ORCHESTRATOR_ADDENDUM_START), false);
+});
+
+test('refreshOrchestratorReferences: patches BOTH dj-tooling pointer and orchestrator addendum on pre-v2 SOULs', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# picard\n\nBody.\n');
+  const r = await refreshOrchestratorReferences({
+    hermesHome: tmp,
+    orchestratorProfile: 'picard',
+  });
+  assert.strictEqual(r.soulPatched, true);
+  assert.strictEqual(r.addendumPatched, true);
+  const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.ok(soulHasDjToolingPointer(soul));
+  assert.ok(soulHasOrchestratorAddendum(soul));
+});
+
+test('refreshOrchestratorReferences: skips addendum on fresh v2 SOULs but still writes reference', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  const v2Soul = `# picard\n\nBody.\n\n${ORCHESTRATOR_V2_MARKER}\n`;
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), v2Soul);
+  const r = await refreshOrchestratorReferences({
+    hermesHome: tmp,
+    orchestratorProfile: 'picard',
+  });
+  assert.strictEqual(r.referenceWritten, true);
+  // dj-tooling pointer may still get patched (independent of v2 marker),
+  // but the addendum must NOT be added because the v2 marker is present.
+  assert.strictEqual(r.addendumPatched, false);
+  const soul = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.strictEqual(soul.includes(ORCHESTRATOR_ADDENDUM_START), false);
+  // v2 marker still present at bottom.
+  assert.ok(soul.includes(ORCHESTRATOR_V2_MARKER));
+});
+
+test('refreshOrchestratorReferences: idempotent across both patches — second run leaves SOUL byte-identical', async (t) => {
+  const tmp = withTmp(t);
+  const dir = path.join(tmp, 'profiles', 'picard');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SOUL.md'), '# picard\n\nBody.\n');
+  await refreshOrchestratorReferences({ hermesHome: tmp, orchestratorProfile: 'picard' });
+  const before = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  const r = await refreshOrchestratorReferences({ hermesHome: tmp, orchestratorProfile: 'picard' });
+  assert.strictEqual(r.soulPatched, false);
+  assert.strictEqual(r.addendumPatched, undefined);
+  const after = fs.readFileSync(path.join(dir, 'SOUL.md'), 'utf8');
+  assert.strictEqual(after, before);
 });
 
 test('pruneStaleReferences: tolerates missing SOUL.md', async (t) => {

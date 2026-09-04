@@ -22,7 +22,12 @@ const {
 // v2: scoped the DJ tooling to the orchestrator profile only, and stripped
 // it from every non-orchestrator profile (specialists have their own SOULs
 // and never need to run the setup flows).
-const REFERENCES_VERSION = 2;
+// v3: back-patched the orchestrator addendum ('Creating an agent', 'The
+// network', 'Where you live') onto pre-v2 orchestrator SOULs so existing
+// fleets pick up the never-clone-your-SOUL guidance without a re-onboard.
+// Fresh orchestrators skip cleanly via the <!-- circe:orchestrator v2 -->
+// marker embedded in the template body.
+const REFERENCES_VERSION = 3;
 
 app.setName('Circe');
 log.initialize();
