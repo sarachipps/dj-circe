@@ -144,6 +144,9 @@ avatarEl.addEventListener('keydown', (e) => {
 const tabs = [];
 const tabsById = new Map();
 let activeTabId = null;
+function activeTab() {
+  return tabsById.get(activeTabId) || tabs[0] || null;
+}
 let tabCounter = 0;
 
 function updateComposer() {

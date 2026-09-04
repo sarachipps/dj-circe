@@ -341,6 +341,63 @@ test('acpClient: loadSession records the sessionId for later resume', async () =
   assert.strictEqual(c._lastSessionId, 'sess-loaded');
 });
 
+test('acpClient: old child exit after auto-restart does not reject new pending', async () => {
+  // Reproduces the race where the OLD child's async 'exit' event fires
+  // after the NEW child has already started, walks the shared _pending
+  // Map, and rejects the new child's in-flight initialize as
+  // "hermes acp exited (null)". Fixed by removing listeners on the old
+  // child before killing it inside _attemptAutoRestart.
+  const { EventEmitter } = require('node:events');
+
+  class FakeChild extends EventEmitter {
+    constructor() {
+      super();
+      this.killed = false;
+      this.stdin = { writable: true, write: () => {} };
+      this.stdout = new EventEmitter();
+      this.stderr = new EventEmitter();
+    }
+    kill() {
+      this.killed = true;
+      // Simulate the real Node behavior — 'exit' fires asynchronously.
+      setImmediate(() => this.emit('exit', null));
+    }
+  }
+
+  // Build a client that wires the same exit handler start() uses.
+  const c = new AcpClient({ profile: 'testp' });
+  const oldChild = new FakeChild();
+  c._child = oldChild;
+  oldChild.on('exit', (code) => {
+    for (const [, p] of c._pending) {
+      p.reject(new Error(`hermes acp exited (${code})`));
+    }
+    c._pending.clear();
+    if (c._autoRestarting) return;
+    c.onExit(code);
+  });
+  c._ready = Promise.resolve();
+  // Fake start() that installs a fresh pending entry (simulates the new
+  // child's initialize call).
+  c.start = () => {
+    c._child = new FakeChild();
+    c._pending.set(999, {
+      resolve: () => {},
+      reject: (err) => { throw new Error('new initialize should not be rejected: ' + err.message); },
+    });
+    c._ready = Promise.resolve();
+    return c._ready;
+  };
+  c._send = async () => ({});
+
+  await c._attemptAutoRestart('unit-test');
+  // Let the old child's queued 'exit' event fire.
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  // The new-child pending entry must still be there — old exit shouldn't touch it.
+  assert.ok(c._pending.has(999), 'new child pending entry must survive old child exit');
+});
+
 test('acpClient.newSession: onRetry fires with attempt number and error', async () => {
   const c = new AcpClient({ profile: 'testp' });
   c._ready = Promise.resolve();

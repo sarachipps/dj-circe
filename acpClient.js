@@ -342,10 +342,18 @@ class AcpClient {
       this._stdoutBuf = '';
       this._stderrBuf = '';
       this._ready = null;
-      // Kill the current child; the exit handler is guarded by
-      // this._autoRestarting so it won't fire onExit.
+      // Detach ALL listeners on the old child before killing it. Its
+      // 'exit' event is emitted asynchronously and would otherwise fire
+      // AFTER start() spawns the new child, walking the shared _pending
+      // map and rejecting the new child's in-flight 'initialize' as
+      // "hermes acp exited (null)". stdout/stderr on a dying pipe could
+      // likewise leak into the fresh transport buffers.
       if (this._child) {
-        try { this._child.kill(); } catch {}
+        const dying = this._child;
+        try { dying.removeAllListeners(); } catch {}
+        try { dying.stdout && dying.stdout.removeAllListeners(); } catch {}
+        try { dying.stderr && dying.stderr.removeAllListeners(); } catch {}
+        try { dying.kill(); } catch {}
         this._child = null;
       }
       try {
