@@ -248,6 +248,10 @@ function createTileWindow(profile, index) {
       if (win.isDestroyed()) return;
       win.webContents.send('acp:autoRestart', payload);
     },
+    onMcpAuthNeeded: (payload) => {
+      if (win.isDestroyed()) return;
+      win.webContents.send('acp:mcpAuthNeeded', payload);
+    },
   });
   tileClients.set(wcId, client);
   client.start().catch((err) => {

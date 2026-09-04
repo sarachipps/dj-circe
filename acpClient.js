@@ -69,6 +69,14 @@ const ACCESS_MODES = ['locked', 'ask', 'unlocked'];
 // enough that a substring match won't false-positive on normal log lines.
 const HERMES_AUTH_REBUILD_PATTERN = 'Could not resolve authentication method';
 
+// Substring + capture group for the "you have to run `hermes mcp login`
+// yourself in a terminal" warning that Hermes emits when an MCP server's
+// OAuth flow trips inside our stdio subprocess. Group 1 = server name.
+// Matches both the "MCP OAuth setup failed" and "failed initial
+// authentication" phrasings that share the "MCP OAuth for '<server>':"
+// prefix.
+const HERMES_MCP_OAUTH_PATTERN = /MCP OAuth for '([^']+)': non-interactive environment/;
+
 // Rate-limit auto-restarts to avoid tight loops if the pattern is somehow
 // misdiagnosed. Keep it forgiving (a real fleet member should never trip
 // this three times in a session) but hard-capped.
@@ -88,13 +96,18 @@ const isRejectOption = (o) =>
   (o?.kind?.startsWith('reject')) || /reject|deny|no|cancel|decline|refuse/i.test(o?.name || o?.optionId || '');
 
 class AcpClient {
-  constructor({ profile, cwd = os.homedir(), onUpdate, onExit, onPermissionRequest, onAutoRestart, accessMode = 'unlocked' }) {
+  constructor({ profile, cwd = os.homedir(), onUpdate, onExit, onPermissionRequest, onAutoRestart, onMcpAuthNeeded, accessMode = 'unlocked' }) {
     this.profile = profile;
     this.cwd = cwd;
     this.onUpdate = onUpdate || (() => {});
     this.onExit = onExit || (() => {});
     this.onPermissionRequest = onPermissionRequest || (() => {});
     this.onAutoRestart = onAutoRestart || (() => {});
+    this.onMcpAuthNeeded = onMcpAuthNeeded || (() => {});
+    // Servers we've already surfaced a hint for in this session — Hermes
+    // re-emits the warning every retry cycle (every ~5 minutes), and one
+    // hint per server per session is plenty.
+    this._mcpAuthHintedServers = new Set();
     this.accessMode = ACCESS_MODES.includes(accessMode) ? accessMode : 'unlocked';
     this._nextId = 1;
     this._pending = new Map();
@@ -309,6 +322,20 @@ class AcpClient {
     // tail matters for pattern detection.
     if (this._stderrBuf.length > 16 * 1024) {
       this._stderrBuf = this._stderrBuf.slice(-8 * 1024);
+    }
+    // MCP OAuth hint: fire once per server per session so the user knows
+    // to run `hermes -p <profile> mcp login <server>` in a terminal.
+    // Scan the fresh chunk only (not the whole buffer) so we don't rehit
+    // the same match on every subsequent stderr line.
+    const oauthMatch = chunk.match(HERMES_MCP_OAUTH_PATTERN);
+    if (oauthMatch) {
+      const server = oauthMatch[1];
+      if (!this._mcpAuthHintedServers.has(server)) {
+        this._mcpAuthHintedServers.add(server);
+        try {
+          this.onMcpAuthNeeded({ server, profile: this.profile });
+        } catch {}
+      }
     }
     if (!this._stderrBuf.includes(HERMES_AUTH_REBUILD_PATTERN)) return;
     // Consume up through the last newline so we don't retrigger on the

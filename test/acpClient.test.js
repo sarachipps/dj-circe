@@ -341,6 +341,60 @@ test('acpClient: loadSession records the sessionId for later resume', async () =
   assert.strictEqual(c._lastSessionId, 'sess-loaded');
 });
 
+test('acpClient: stderr with MCP OAuth non-interactive warning fires onMcpAuthNeeded', () => {
+  const events = [];
+  const c = new AcpClient({
+    profile: 'geordi',
+    onMcpAuthNeeded: (p) => events.push(p),
+  });
+  c._onStderr(
+    "[acp:geordi] 2026-09-04 12:06:35 [WARNING] tools.mcp_tool: " +
+    "MCP OAuth setup failed for 'atlassian': " +
+    "MCP OAuth for 'atlassian': non-interactive environment and no cached tokens found. " +
+    "Run `hermes mcp login atlassian` interactively first to complete initial authorization.\n"
+  );
+  assert.deepStrictEqual(events, [{ server: 'atlassian', profile: 'geordi' }]);
+});
+
+test('acpClient: MCP OAuth hint fires once per server per session', () => {
+  const events = [];
+  const c = new AcpClient({
+    profile: 'geordi',
+    onMcpAuthNeeded: (p) => events.push(p),
+  });
+  const warn =
+    "[WARNING] MCP OAuth for 'atlassian': non-interactive environment and no cached tokens found.\n";
+  c._onStderr(warn);
+  c._onStderr(warn);
+  c._onStderr(warn);
+  assert.strictEqual(events.length, 1);
+});
+
+test('acpClient: MCP OAuth hint fires separately per server', () => {
+  const events = [];
+  const c = new AcpClient({
+    profile: 'geordi',
+    onMcpAuthNeeded: (p) => events.push(p),
+  });
+  c._onStderr("[WARNING] MCP OAuth for 'atlassian': non-interactive environment.\n");
+  c._onStderr("[WARNING] MCP OAuth for 'notion': non-interactive environment.\n");
+  assert.deepStrictEqual(
+    events.map((e) => e.server).sort(),
+    ['atlassian', 'notion']
+  );
+});
+
+test('acpClient: stderr without MCP OAuth pattern does NOT fire the hint', () => {
+  const events = [];
+  const c = new AcpClient({
+    profile: 'geordi',
+    onMcpAuthNeeded: (p) => events.push(p),
+  });
+  c._onStderr("[INFO] normal log line, nothing to see here\n");
+  c._onStderr("[INFO] MCP server 'atlassian' registered 0 tool(s)\n");
+  assert.deepStrictEqual(events, []);
+});
+
 test('acpClient: prompt() absorbs auto-restart and retries once after resume', async () => {
   // The exact user-facing bug: user types a prompt, Hermes hits the
   // auth-rebuild TypeError mid-stream, _attemptAutoRestart rejects the

@@ -519,6 +519,25 @@ if (window.hermes.onAutoRestart) {
   });
 }
 
+// MCP server needs interactive OAuth: Hermes emits a warning on stderr
+// when it tries to set up an OAuth-backed MCP server (Atlassian etc.)
+// under a non-interactive stdio subprocess. We surface an in-tile hint
+// with the exact command the user should run in their terminal. Fires
+// once per server per session — Hermes retries the connect on a timer,
+// but the fix is always the same command.
+if (window.hermes.onMcpAuthNeeded) {
+  window.hermes.onMcpAuthNeeded(({ server, profile }) => {
+    const tab = activeTab();
+    if (!tab) return;
+    const cmd = `hermes -p ${profile} mcp login ${server}`;
+    const text =
+      `The "${server}" MCP server needs interactive OAuth. It can't run inside Circe — ` +
+      `in a terminal, run:\n\n${cmd}\n\n` +
+      `A browser tab will open for sign-in. Once it's done, close and reopen this tile.`;
+    appendMessage(tab, 'agent', text, 'info');
+  });
+}
+
 window.hermes.onExit(({ code }) => {
   for (const tab of tabs) {
     appendMessage(tab, 'agent', `agent exited (${code})`, 'error');
