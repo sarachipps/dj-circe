@@ -533,7 +533,8 @@ if (window.hermes.onMcpAuthNeeded) {
     const text =
       `The "${server}" MCP server needs interactive OAuth. It can't run inside Circe — ` +
       `in a terminal, run:\n\n${cmd}\n\n` +
-      `A browser tab will open for sign-in. Once it's done, close and reopen this tile.`;
+      `A browser tab will open for sign-in. Once it's done, close this tile (it will ` +
+      `reopen automatically) so the fresh tokens get picked up.`;
     appendMessage(tab, 'agent', text, 'info');
   });
 }

@@ -287,6 +287,16 @@ function createTileWindow(profile, index) {
     }
     tileProfiles.delete(wcId);
     openProfiles.delete(profile.name);
+    // Soft-restart: closing a tile with the ✕ / Cmd+W shouldn't strand
+    // the profile until the next full app relaunch. Respawn the window
+    // for the same profile unless the whole app is quitting. Do this
+    // synchronously so 'window-all-closed' doesn't fire and quit the
+    // app between close and reopen when this was the only tile.
+    if (!isQuitting) {
+      log.info(`Auto-reopening tile for profile "${profile.name}"`);
+      openProfiles.add(profile.name);
+      createTileWindow(profile, index);
+    }
   });
 
   win.loadFile('index.html');
@@ -294,6 +304,10 @@ function createTileWindow(profile, index) {
 
 const openProfiles = new Set();
 let watchDebounce = null;
+// Set true once Electron starts tearing the app down (Cmd+Q, quit menu,
+// window-all-closed handler). Individual tile 'closed' events auto-reopen
+// unless this is set — we treat close as "soft restart this profile".
+let isQuitting = false;
 
 async function syncTiles() {
   try {
@@ -501,7 +515,15 @@ app.whenReady().then(async () => {
   }
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
 app.on('window-all-closed', () => {
+  // If auto-reopen kicked in we'd get here transiently; but auto-reopen
+  // runs on setImmediate BEFORE 'window-all-closed' fires on macOS, so
+  // in practice this only triggers on real quits.
+  isQuitting = true;
   log.info('all windows closed — quitting');
   for (const c of tileClients.values()) c.stop();
   tileClients.clear();
